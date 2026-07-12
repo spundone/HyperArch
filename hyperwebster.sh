@@ -54,8 +54,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$SCRIPT_DIR/work"
 OFFLINE="$SCRIPT_DIR/offline"
-INVOKING_USER="${SUDO_USER:-$(id -un)}"
-INVOKING_GROUP="$(id -gn "$INVOKING_USER")"
+# Prefer container-forwarded identity so ISO ownership matches the host user
+# (OrbStack / Docker Desktop / WSL bind mounts).
+if [ -n "${HYPERWEBSTER_BUILD_UID:-}" ] && [ -n "${HYPERWEBSTER_BUILD_GID:-}" ]; then
+  INVOKING_USER="${HYPERWEBSTER_BUILD_USER:-$(id -un)}"
+  INVOKING_UID="$HYPERWEBSTER_BUILD_UID"
+  INVOKING_GID="$HYPERWEBSTER_BUILD_GID"
+else
+  INVOKING_USER="${SUDO_USER:-$(id -un)}"
+  INVOKING_UID="$(id -u "$INVOKING_USER")"
+  INVOKING_GID="$(id -g "$INVOKING_USER")"
+fi
+INVOKING_GROUP="$(id -gn "$INVOKING_USER" 2>/dev/null || echo "$INVOKING_USER")"
 OUT_ISO="$SCRIPT_DIR/hyperwebster-arch-$(date +%Y%m%d).iso"
 
 # ---------------------------------------------------------------- pins ------
@@ -176,6 +186,8 @@ BASE_PKGS=(
   cachyos-kernel-manager
   # Gaming overlays (lightweight; Steam/Lutris stay opt-in via Additions)
   gamemode lib32-gamemode mangohud
+  # iPhone USB tether (omatether TUI) + gum for Charm-style TUIs
+  usbmuxd libimobiledevice gum usbutils
 )
 
 # Every GPU driver variant goes into the offline repo; the installer detects
@@ -194,6 +206,10 @@ GPU_ALL_PKGS=(
 
 # Prebuilt binaries from the omarchy repo (skips their GraalVM AUR build).
 LIMINE_TOOLS=(limine-snapper-sync limine-mkinitcpio-hook)
+
+# Live ISO only (installer TUI) — downloaded into the offline repo and pacstrapped
+# into airootfs at build time. Not installed on the target system.
+LIVE_ISO_PKGS=(gum)
 
 # CachyOS kernel + trust/mirror packages — vendored into the offline repo at
 # ISO build time (see build_offline_payload). linux stays as a Limine fallback.
@@ -303,7 +319,7 @@ download_offline_closure() {
       --config "$OFFLINE/dl-pacman.conf" \
       --dbpath "$OFFLINE/dl-db" \
       --cachedir "$OFFLINE/iso/repo" \
-      "${BASE_PKGS[@]}" "${GPU_ALL_PKGS[@]}" "${LIMINE_TOOLS[@]}"; then
+      "${BASE_PKGS[@]}" "${GPU_ALL_PKGS[@]}" "${LIMINE_TOOLS[@]}" "${LIVE_ISO_PKGS[@]}"; then
       return 0
     fi
     echo "WARNING: pacman download failed (attempt $attempt/$max_attempts)." >&2
@@ -354,59 +370,185 @@ fi
 
 clear
 
-# --- styled UI helpers (pure bash, no extra packages). They draw to /dev/tty
-# directly so the arrow-key redraws never spam the tee'd installer.log. The UI
-# is centre-aligned to the console width. --------------------------------------
-NSI_G=$'\033[38;5;150m'       # HyperWebster green
-NSI_GB=$'\033[1;38;5;150m'    # bold green
-NSI_DIM=$'\033[0;90m'         # dim/grey
-NSI_B=$'\033[1m'
-NSI_R=$'\033[0m'
+# --- HyperWebster OS installer UI (Tokyo Night + gum, bash fallback). ------------
+# Charm-style menus when gum is present; ANSI fallback otherwise. Redraws go to
+# /dev/tty so the tee'd installer.log stays clean.
+HW_CYAN=$'\033[38;5;81m'      # gum confirm prompt (foreground 6)
+HW_GREEN=$'\033[38;5;114m'    # gum logo / accent (foreground 2)
+HW_G=$'\033[38;5;114m'        # alias kept for older call sites
+HW_GB=$'\033[1;38;5;114m'     # bold green
+HW_SEL_BG=$'\033[48;5;22m'    # green highlight bar (gum selected bg 2)
+HW_SEL_FG=$'\033[38;5;0m'     # black text on selected
+HW_DIM=$'\033[0;90m'
+HW_B=$'\033[1m'
+HW_R=$'\033[0m'
 
-# Console width (from the real console — stdout is tee'd to a pipe). Default 80.
-nsi_cols() {
+HW_STEP=0
+HW_TOTAL=4   # Account · Region · Disk · Security
+
+# Console width (stdout is tee'd — read from the real tty). Default 80.
+hw_cols() {
   local c; c=$(stty size </dev/tty 2>/dev/null | awk '{print $2}')
   case "$c" in ''|*[!0-9]*) c=80 ;; esac
   [ "$c" -ge 20 ] 2>/dev/null || c=80
   printf '%s' "$c"
 }
-# Left-pad string for centring a block of visible width $1.
-nsi_pad() {
-  local cols p; cols=$(nsi_cols); p=$(( (cols - $1) / 2 )); [ "$p" -lt 0 ] && p=0
+hw_pad() {
+  local cols p; cols=$(hw_cols); p=$(( (cols - $1) / 2 )); [ "$p" -lt 0 ] && p=0
   printf '%*s' "$p" ''
 }
-# Centred line of PLAIN text. $2=colour code (optional), $3=reset (optional).
-cecho() { printf '%s%s%s%s\n' "$(nsi_pad "${#1}")" "${2:-}" "$1" "${3:-}"; }
-# Centred read into VAR: cread VAR "prompt". csecret = silent (passwords).
-cread()   { printf '%s' "$(nsi_pad "${#2}")" >/dev/tty; read -rp  "$2" "$1" </dev/tty; }
-csecret() { printf '%s' "$(nsi_pad "${#2}")" >/dev/tty; read -rsp "$2" "$1" </dev/tty; echo; }
+cecho() { printf '%s%s%s%s\n' "$(hw_pad "${#1}")" "${2:-}" "$1" "${3:-}"; }
+tcecho() { printf '%s%s%s%s\n' "$(hw_pad "${#1}")" "${2:-}" "$1" "${3:-}" >/dev/tty; }
+cread()   { printf '%s' "$(hw_pad "${#2}")" >/dev/tty; read -rp  "$2" "$1" </dev/tty; }
+csecret() { printf '%s' "$(hw_pad "${#2}")" >/dev/tty; read -rsp "$2" "$1" </dev/tty; echo; }
 
-# tui_menu "Title" "opt1" "opt2" ... -> sets MENU_CHOICE (0-based index) + MENU_VALUE.
-# Navigate with ↑/↓ (or j/k), Enter selects. Centre-aligned as a block.
+# Starman logo lines (same art as assets/branding/starman-installer.txt).
+STARMAN_LINES=(
+  '                                                 .     '
+  '                                                       '
+  '                                                       '
+  'oo                                                     '
+  'o.                      ........                       '
+  '                   ...  ..  .....o.                    '
+  '                 ..              ....                  '
+  '               ..           ..oo.   ......             '
+  '               ..     ..     o88o.   .....             '
+  '               . .   ...  .  .888o.  ... .             '
+  '               .     ...             ......            '
+  '               ..    ...             .... .            '
+)
+LOGO_WIDTH=0
+for _hw_l in "${STARMAN_LINES[@]}"; do
+  [ "${#_hw_l}" -gt "$LOGO_WIDTH" ] && LOGO_WIDTH=${#_hw_l}
+done
+PADDING_LEFT=$(( ( $(hw_cols) - LOGO_WIDTH ) / 2 ))
+[ "$PADDING_LEFT" -lt 0 ] && PADDING_LEFT=0
+
+# Tokyo Night gum theme (matches Omarchy presentation.sh).
+hw_gum_theme() {
+  command -v gum &>/dev/null || return 0
+  export GUM_CONFIRM_PROMPT_FOREGROUND=6
+  export GUM_CONFIRM_SELECTED_FOREGROUND=0
+  export GUM_CONFIRM_SELECTED_BACKGROUND=2
+  export GUM_CONFIRM_UNSELECTED_FOREGROUND=7
+  export GUM_CONFIRM_UNSELECTED_BACKGROUND=0
+  export GUM_CHOOSE_HEADER_FOREGROUND=6
+  export GUM_CHOOSE_CURSOR_FOREGROUND=2
+  export GUM_CHOOSE_SELECTED_FOREGROUND=0
+  export GUM_CHOOSE_SELECTED_BACKGROUND=2
+  export GUM_INPUT_PROMPT_FOREGROUND=6
+  local pad="0 0 0 $PADDING_LEFT"
+  export GUM_CHOOSE_PADDING="$pad"
+  export GUM_CONFIRM_PADDING="$pad"
+  export GUM_INPUT_PADDING="$pad"
+  export GUM_SPIN_PADDING="$pad"
+}
+hw_gum_theme
+
+hw_draw_logo() {
+  if command -v gum &>/dev/null; then
+    gum style --foreground 2 --padding "1 0 0 $PADDING_LEFT" \
+      "$(printf '%s\n' "${STARMAN_LINES[@]}")" >/dev/tty
+  else
+    for _hw_l in "${STARMAN_LINES[@]}"; do
+      cecho "$_hw_l" "$HW_GB" "$HW_R"
+    done
+  fi
+  local bpad; bpad=$(hw_pad 46)
+  {
+    printf '%s%s%s\n' "$bpad" "$HW_GB" "┌────────────────────────────────────────────┐"
+    printf '%s%s%s\n' "$bpad" "$HW_GB" "│       HyperWebster OS · hyperarch · Starman  │"
+    printf '%s%s%s\n' "$bpad" "$HW_GB" "└────────────────────────────────────────────┘"
+    printf '%s' "$HW_R"
+  } >/dev/tty
+}
+
+hw_step_begin() {
+  HW_STEP=$((HW_STEP + 1))
+  clear >/dev/tty
+  hw_draw_logo
+  cecho "Step ${HW_STEP}/${HW_TOTAL} · $1" "$HW_CYAN" "$HW_R"
+  echo >/dev/tty
+}
+
+# Text / password prompts — gum input when available.
+hw_read() {
+  local var="$1" prompt="$2" default="${3:-}"
+  if command -v gum &>/dev/null; then
+    local -a args=(input --placeholder "$prompt")
+    [ -n "$default" ] && args+=(--value "$default")
+    local val; val=$(gum "${args[@]}" </dev/tty 2>/dev/null) || val=""
+    if [ -z "$val" ] && [ -n "$default" ]; then val="$default"; fi
+    printf -v "$var" '%s' "$val"
+  else
+    cread "$var" "$prompt"
+    if [ -n "$default" ] && [ -z "${!var}" ]; then printf -v "$var" '%s' "$default"; fi
+  fi
+}
+hw_secret() {
+  local var="$1" prompt="$2"
+  if command -v gum &>/dev/null; then
+    local val; val=$(gum input --password --placeholder "$prompt" </dev/tty 2>/dev/null) || val=""
+    printf -v "$var" '%s' "$val"
+  else
+    csecret "$var" "$prompt"
+  fi
+}
+
+# gum choose / bash arrow-key menu. Sets MENU_CHOICE (0-based) + MENU_VALUE.
+hw_choose() {
+  local title="$1"; shift
+  local -a opts=("$@")
+  if command -v gum &>/dev/null; then
+    MENU_VALUE=$(gum choose --header "$title" "${opts[@]}" </dev/tty)
+    local i
+    for i in "${!opts[@]}"; do
+      if [ "${opts[$i]}" = "$MENU_VALUE" ]; then MENU_CHOICE=$i; return; fi
+    done
+    MENU_CHOICE=0
+    return
+  fi
+  tui_menu "$title" "${opts[@]}"
+}
+
+# gum confirm / Yes-No menu. Returns 0 on Yes. $2 = default (y|n).
+hw_confirm() {
+  local prompt="$1" default="${2:-n}"
+  if command -v gum &>/dev/null; then
+    if [ "$default" = y ]; then
+      gum confirm --default=true --affirmative "Yes" --negative "No" "$prompt" </dev/tty
+    else
+      gum confirm --default=false --affirmative "Yes" --negative "No" "$prompt" </dev/tty
+    fi
+    return $?
+  fi
+  tui_menu "$prompt" "No" "Yes"
+  [ "$MENU_CHOICE" -eq 1 ]
+}
+
 tui_menu() {
   local title="$1"; shift
   local -a opts=("$@")
   local n=${#opts[@]} sel=0 first=1 i key rest o w
-  local lines=$(( n + 3 ))    # title + blank + n options + hint
+  local lines=$(( n + 3 ))
   local hint='↑/↓ move · Enter select'
-  # Block width = widest of title, "❯ "+option, hint — then centre that block.
   local maxw=${#title}
   for o in "${opts[@]}"; do w=$(( ${#o} + 2 )); [ "$w" -gt "$maxw" ] && maxw=$w; done
   [ "${#hint}" -gt "$maxw" ] && maxw=${#hint}
-  local pad; pad=$(nsi_pad "$maxw")
+  local pad; pad=$(hw_pad "$maxw")
   printf '\033[?25l' >/dev/tty
   while true; do
     if [ "$first" -eq 1 ]; then first=0; else printf '\033[%dA' "$lines" >/dev/tty; fi
     {
-      printf '\r\033[2K%s%s%s%s\n\r\033[2K\n' "$pad" "$NSI_GB" "$title" "$NSI_R"
+      printf '\r\033[2K%s%s%s%s\n\r\033[2K\n' "$pad" "$HW_CYAN" "$title" "$HW_R"
       for i in "${!opts[@]}"; do
         if [ "$i" -eq "$sel" ]; then
-          printf '\r\033[2K%s%s❯%s %s%s%s\n' "$pad" "$NSI_GB" "$NSI_R" "$NSI_B" "${opts[$i]}" "$NSI_R"
+          printf '\r\033[2K%s%s%s ❯ %s%s\n' "$pad" "$HW_SEL_BG" "$HW_SEL_FG" "${opts[$i]}" "$HW_R"
         else
-          printf '\r\033[2K%s  %s%s%s\n' "$pad" "$NSI_DIM" "${opts[$i]}" "$NSI_R"
+          printf '\r\033[2K%s  %s%s%s\n' "$pad" "$HW_DIM" "${opts[$i]}" "$HW_R"
         fi
       done
-      printf '\r\033[2K%s%s%s%s\n' "$pad" "$NSI_DIM" "$hint" "$NSI_R"
+      printf '\r\033[2K%s%s%s%s\n' "$pad" "$HW_DIM" "$hint" "$HW_R"
     } >/dev/tty
     IFS= read -rsn1 key </dev/tty || true
     case "$key" in
@@ -426,75 +568,65 @@ tui_menu() {
   MENU_VALUE="${opts[$sel]}"
 }
 
-# Install-progress UI. During the heavy install phase ALL command output is
-# redirected to /tmp/installer.log (off-screen) and the user sees only a single
-# CENTRED spinner + the current phase name on /dev/tty — calm and consistent
-# with the centred menus, no scrolling formatting/build-hook spam. Full detail
-# stays in the log (Ctrl+Alt+F2 -> cat /tmp/installer.log).
-NSI_PHASE_FILE=/tmp/nsi-phase
-NSI_SPIN_PID=""
-# Centred line drawn straight to the real console (stdout is the log mid-install).
-tcecho() { printf '%s%s%s%s\n' "$(nsi_pad "${#1}")" "${2:-}" "$1" "${3:-}" >/dev/tty; }
-# Set the phase label the spinner shows.
-nsi_phase() { printf '%s' "$1" > "$NSI_PHASE_FILE" 2>/dev/null || true; }
-nsi_spin_start() {
-  printf '\033[?25l' >/dev/tty   # hide cursor
+# Install-progress UI — Omarchy-style logo + live log tail (logging.sh).
+HW_PHASE_FILE=/tmp/hw-phase
+HW_LOG_PID=""
+HW_LOG_LINES=14
+
+hw_phase() { printf '%s' "$1" > "$HW_PHASE_FILE" 2>/dev/null || true; }
+
+hw_log_start() {
+  printf '\033[?25l\033[s' >/dev/tty
   (
     set +e
-    local frames='/-\|' i=0 msg vis pad
+    local n=$HW_LOG_LINES maxw=$(( LOGO_WIDTH + 16 )) pad line out i
     while true; do
-      msg=$(cat "$NSI_PHASE_FILE" 2>/dev/null); [ -n "$msg" ] || msg="Working"
-      vis=$(( ${#msg} + 5 ))     # frame + 2 spaces + msg + ellipsis
-      pad=$(nsi_pad "$vis")
-      printf '\r\033[2K%s%s%s%s  %s%s…%s' \
-        "$pad" "$NSI_GB" "${frames:i%4:1}" "$NSI_R" "$NSI_B" "$msg" "$NSI_R" >/dev/tty
-      i=$((i+1)); sleep 0.15
+      mapfile -t _lines < <(tail -n "$n" /tmp/installer.log 2>/dev/null)
+      out=""
+      for ((i=0; i<n; i++)); do
+        line="${_lines[i]:-}"
+        [ "${#line}" -gt "$maxw" ] && line="${line:0:$maxw}..."
+        pad=$(hw_pad $((maxw + 4)))
+        if [ -n "$line" ]; then
+          out+=$'\033[2K'"${pad}${HW_DIM} → ${line}${HW_R}"$'\n'
+        else
+          out+=$'\033[2K'"${pad}"$'\n'
+        fi
+      done
+      printf '\033[u%b' "$out" >/dev/tty
+      sleep 0.12
     done
   ) &
-  NSI_SPIN_PID=$!
+  HW_LOG_PID=$!
 }
-nsi_spin_stop() {
-  [ -n "$NSI_SPIN_PID" ] && { kill "$NSI_SPIN_PID" 2>/dev/null || true; wait "$NSI_SPIN_PID" 2>/dev/null || true; NSI_SPIN_PID=""; }
-  printf '\r\033[2K\033[?25h' >/dev/tty   # clear the spinner line, show cursor
+
+hw_log_stop() {
+  [ -n "$HW_LOG_PID" ] && { kill "$HW_LOG_PID" 2>/dev/null || true; wait "$HW_LOG_PID" 2>/dev/null || true; HW_LOG_PID=""; }
+  printf '\033[?25h' >/dev/tty
 }
-# ERR trap during install: stop the spinner, restore on-screen output, and show
-# which phase failed + the tail of the log (full detail on tty2).
-nsi_fail() {
+
+hw_install_screen() {
+  clear >/dev/tty
+  hw_draw_logo
+  tcecho "Installing HyperWebster OS" "$HW_GB" "$HW_R"
+  tcecho "Logs stream below · full detail on tty2 (Ctrl+Alt+F2)" "$HW_DIM" "$HW_R"
+  printf '\n' >/dev/tty
+}
+
+hw_fail() {
   trap - ERR
-  nsi_spin_stop
+  hw_log_stop
   exec >/dev/tty 2>&1
   echo
-  cecho "Install FAILED at: $(cat "$NSI_PHASE_FILE" 2>/dev/null)" "$NSI_GB" "$NSI_R"
-  cecho "See the log on tty2:  Ctrl+Alt+F2  →  cat /tmp/installer.log" "$NSI_DIM" "$NSI_R"
+  cecho "Install FAILED at: $(cat "$HW_PHASE_FILE" 2>/dev/null)" "$HW_GB" "$HW_R"
+  cecho "See the log on tty2:  Ctrl+Alt+F2  →  cat /tmp/installer.log" "$HW_DIM" "$HW_R"
   echo
   tail -n 25 /tmp/installer.log 2>/dev/null
 }
 
-# Banner — centred Starman (detailed image-to-ASCII, helmet crop). ASCII only.
-STARMAN_LINES=(
-  '                                                 .     '
-  '                                                       '
-  '                                                       '
-  'oo                                                     '
-  'o.                      ........                       '
-  '                   ...  ..  .....o.                    '
-  '                 ..              ....                  '
-  '               ..           ..oo.   ......             '
-  '               ..     ..     o88o.   .....             '
-  '               . .   ...  .  .888o.  ... .             '
-  '               .     ...             ......            '
-  '               ..    ...             .... .            '
-)
-for line in "${STARMAN_LINES[@]}"; do
-  printf '%s%s%s\n' "$(nsi_pad ${#line})" "$NSI_GB" "$line"
-done
-printf '\n'
-BPAD=$(nsi_pad 46)
-printf '%s%s%s\n'   "$BPAD" "$NSI_GB" "┌────────────────────────────────────────────┐"
-printf '%s%s%s\n'   "$BPAD" "$NSI_GB" "│        HyperWebster · hyperarch · Starman    │"
-printf '%s%s%s\n'   "$BPAD" "$NSI_GB" "└────────────────────────────────────────────┘"
-printf '%s'         "$NSI_R"
-cecho "Arch · Hyprland · Caelestia · gaming desktop — offline installer" "$NSI_DIM" "$NSI_R"
+# Welcome screen (before step 1).
+hw_draw_logo
+cecho "HyperWebster OS · Arch · Hyprland · gaming desktop - offline" "$HW_DIM" "$HW_R"
 echo
 
 # ----------------------------------------------------- offline payload ------
@@ -506,7 +638,7 @@ echo
 # Remount the install media by the UUID archiso itself booted from.
 HYPERWEBSTER_PAYLOAD=/run/archiso/bootmnt/hyperwebster
 if [ ! -f "$HYPERWEBSTER_PAYLOAD/repo/hyperwebster.db" ]; then
-  cecho "Boot media unmounted by copytoram — remounting the offline repo..." "$NSI_DIM" "$NSI_R"
+  cecho "Boot media unmounted by copytoram - remounting the offline repo..." "$HW_DIM" "$HW_R"
   iso_uuid=$(sed -n 's/.*archisosearchuuid=\([^ ]*\).*/\1/p' /proc/cmdline)
   iso_label=$(sed -n 's/.*archisolabel=\([^ ]*\).*/\1/p' /proc/cmdline)
   iso_dev=""
@@ -531,7 +663,7 @@ if [ ! -f "$HYPERWEBSTER_PAYLOAD/repo/hyperwebster.db" ] || [ ! -f "$HYPERWEBSTE
 fi
 # Strip comments/blank lines so the list file can be annotated.
 mapfile -t BASE_PKGS < <(grep -vE '^\s*(#|$)' "$HYPERWEBSTER_PAYLOAD/base-packages.list")
-cecho "Offline repo found (${#BASE_PKGS[@]} base packages)." "$NSI_DIM" "$NSI_R"
+cecho "Offline repo found (${#BASE_PKGS[@]} base packages)." "$HW_DIM" "$HW_R"
 echo
 
 # pacman config used for every install-time operation: ONLY the bundled repo.
@@ -556,34 +688,31 @@ OFFLINECONF
 # boot. So the installer asks for nothing here.
 
 # ---------------------------------------------------------------- prompts ----
+hw_step_begin "Account"
 while true; do
-  cread HOSTNAME "Hostname [hyperarch]: "
-  HOSTNAME="${HOSTNAME:-hyperarch}"
+  hw_read HOSTNAME "Hostname" "hyperarch"
   [[ "$HOSTNAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]] && break
-  cecho "Invalid (RFC 1123: letters/digits/hyphen, no leading hyphen, max 63 chars)."
+  cecho "Invalid (RFC 1123: letters/digits/hyphen, no leading hyphen, max 63 chars)." "$HW_DIM" "$HW_R"
 done
 
 while true; do
-  cread USERNAME "Username: "
+  hw_read USERNAME "Username"
   [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] && break
-  cecho "Invalid (lowercase, starts a-z or _, max 31 chars)."
+  cecho "Invalid (lowercase, starts a-z or _, max 31 chars)." "$HW_DIM" "$HW_R"
 done
 
 while true; do
-  csecret PW1 "Password for $USERNAME (also used for root): "
-  csecret PW2 "Confirm password: "
-  if [ -z "$PW1" ]; then cecho "Empty — try again."; continue; fi
-  if [ "$PW1" != "$PW2" ]; then cecho "Mismatch — try again."; continue; fi
+  hw_secret PW1 "Password for $USERNAME (also used for root)"
+  hw_secret PW2 "Confirm password"
+  if [ -z "$PW1" ]; then cecho "Empty - try again." "$HW_DIM" "$HW_R"; continue; fi
+  if [ "$PW1" != "$PW2" ]; then cecho "Mismatch - try again." "$HW_DIM" "$HW_R"; continue; fi
   break
 done
 USER_PW="$PW1"
 echo
 
-# Localisation — pick a region from a curated list; it sets the timezone, locale,
-# console keymap and Hyprland xkb layout together (no more three cryptic prompts).
-# "Other" drops to the search-based prompts for anything not listed. The curated
-# values are all standard tzdata/locale.gen/kbd names present on the ISO.
-tui_menu "Where are you?  (sets time zone, language & keyboard)" \
+hw_step_begin "Region"
+hw_choose "Where are you?  (sets time zone, language & keyboard)" \
   "United Kingdom" \
   "Ireland" \
   "United States" \
@@ -594,7 +723,7 @@ tui_menu "Where are you?  (sets time zone, language & keyboard)" \
   "Spain" \
   "Italy" \
   "Netherlands" \
-  "Other (advanced — type & search)"
+  "Other (advanced - type & search)"
 case "$MENU_VALUE" in
   "United Kingdom") TIMEZONE=Europe/London;    LOCALE=en_GB.UTF-8; KEYMAP=uk;        XKB_LAYOUT=gb ;;
   "Ireland")        TIMEZONE=Europe/Dublin;    LOCALE=en_IE.UTF-8; KEYMAP=uk;        XKB_LAYOUT=gb ;;
@@ -654,11 +783,9 @@ case "$MENU_VALUE" in
     esac
     ;;
 esac
-cecho "Region set: ${TIMEZONE} · ${LOCALE} · keymap ${KEYMAP}" "$NSI_DIM" "$NSI_R"
+cecho "Region set: ${TIMEZONE} · ${LOCALE} · keymap ${KEYMAP}" "$HW_DIM" "$HW_R"
 
-# Disk — arrow-key pick from the real disks, then a plain Yes/No confirm
-# (defaults to No). No more typing the device path.
-echo
+hw_step_begin "Disk"
 mapfile -t DISKS < <(lsblk -d -n -p -o NAME,SIZE,MODEL | grep -Ev '/dev/(loop|sr|zram|fd)')
 if [ "${#DISKS[@]}" -eq 0 ]; then
   cecho "No disks found. Dropping to shell."
@@ -669,53 +796,52 @@ while true; do
   for d in "${DISKS[@]}"; do
     DISK_LABELS+=("$(awk '{name=$1; size=$2; $1=""; $2=""; sub(/^[[:space:]]+/,""); printf "%-16s %-9s %s", name, size, $0}' <<<"$d")")
   done
-  tui_menu "Install to which disk?  (everything on it is erased)" "${DISK_LABELS[@]}"
+  hw_choose "Install to which disk?  (everything on it is erased)" "${DISK_LABELS[@]}"
   DISK=$(awk '{print $1}' <<<"${DISKS[$MENU_CHOICE]}")
-  tui_menu "Erase $DISK and install HyperWebster?" \
-    "No — choose a different disk" \
-    "Yes — ERASE $DISK and install"
-  [ "$MENU_CHOICE" -eq 1 ] && break
+  if hw_confirm "Erase $DISK and install HyperWebster OS?  All data on this disk will be lost." n; then
+    break
+  fi
 done
 
-echo
-tui_menu "Encrypt the root disk with LUKS2?" \
-  "Yes — LUKS2 encryption (recommended)" \
-  "No — plain btrfs (no encryption)"
+hw_step_begin "Security"
+hw_choose "Encrypt the root disk with LUKS2?" \
+  "Yes - LUKS2 encryption (recommended)" \
+  "No - plain btrfs (no encryption)"
 USE_LUKS=$MENU_CHOICE
 
 LUKS_PW=""
 if [ "$USE_LUKS" -eq 0 ]; then
   echo
-  tui_menu "LUKS fallback passphrase (when TPM unlock fails)?" \
+  hw_choose "LUKS fallback passphrase (when TPM unlock fails)?" \
     "Same as $USERNAME login password" \
     "Different passphrase (enter twice)"
   if [ "$MENU_CHOICE" -eq 0 ]; then
     LUKS_PW="$USER_PW"
-    cecho "LUKS fallback will use your login password." "$NSI_DIM" "$NSI_R"
+    cecho "LUKS fallback will use your login password." "$HW_DIM" "$HW_R"
   else
     while true; do
-      csecret LUKS_PW1 "LUKS passphrase (fallback when TPM unlock fails): "
-      csecret LUKS_PW2 "Confirm LUKS passphrase: "
-      if [ -z "$LUKS_PW1" ]; then cecho "Empty — try again."; continue; fi
-      if [ "$LUKS_PW1" != "$LUKS_PW2" ]; then cecho "Mismatch — try again."; continue; fi
+      hw_secret LUKS_PW1 "LUKS passphrase (fallback when TPM unlock fails)"
+      hw_secret LUKS_PW2 "Confirm LUKS passphrase"
+      if [ -z "$LUKS_PW1" ]; then cecho "Empty - try again."; continue; fi
+      if [ "$LUKS_PW1" != "$LUKS_PW2" ]; then cecho "Mismatch - try again."; continue; fi
       break
     done
     LUKS_PW="$LUKS_PW1"
   fi
-  cecho "Root partition will be LUKS2-encrypted." "$NSI_DIM" "$NSI_R"
+  cecho "Root partition will be LUKS2-encrypted." "$HW_DIM" "$HW_R"
   LUKS_TPM=1
   if [ -e /dev/tpmrm0 ] || [ -e /dev/tpm0 ]; then
     echo
-    tui_menu "Enroll TPM2 for passphrase-free unlock at boot?" \
-      "Yes — TPM2 auto-unlock (passphrase stays as fallback)" \
-      "No — passphrase only"
+    hw_choose "Enroll TPM2 for passphrase-free unlock at boot?" \
+      "Yes - TPM2 auto-unlock (passphrase stays as fallback)" \
+      "No - passphrase only"
     LUKS_TPM=$MENU_CHOICE
-    [ "$LUKS_TPM" -eq 0 ] && cecho "TPM2 will be enrolled after install." "$NSI_DIM" "$NSI_R"
+    [ "$LUKS_TPM" -eq 0 ] && cecho "TPM2 will be enrolled after install." "$HW_DIM" "$HW_R"
   else
-    cecho "No TPM detected — passphrase-only LUKS." "$NSI_DIM" "$NSI_R"
+    cecho "No TPM detected - passphrase-only LUKS." "$HW_DIM" "$HW_R"
   fi
 else
-  cecho "Root partition will NOT be encrypted." "$NSI_DIM" "$NSI_R"
+  cecho "Root partition will NOT be encrypted." "$HW_DIM" "$HW_R"
   LUKS_TPM=1
 fi
 
@@ -726,22 +852,13 @@ else
 fi
 
 # ---------------------------------------------------------------- install ----
-# Go quiet + centred for the heavy phase: the prompts are done, so hide every
-# command's output to the log and show a single centred spinner with the current
-# phase name (consistent with the centred menus, no formatting/build-hook spam).
-clear
-# Silence kernel printk on the console — disk format/mount triggers harmless
-# btrfs/ext4 probe messages ("VFS: Can't find ext4 filesystem") that write
-# straight to the VT and would splatter over the clean spinner. (dmesg keeps
-# them; this only stops console printing. Not restored — a reboot follows.)
+# Omarchy-style: logo stays visible, install output streams in a live log panel.
 dmesg -D 2>/dev/null || echo 1 > /proc/sys/kernel/printk 2>/dev/null || true
-tcecho "Installing HyperWebster" "$NSI_GB" "$NSI_R"
-tcecho "this takes a few minutes — sit tight" "$NSI_DIM" "$NSI_R"
-printf '\n' >/dev/tty
-nsi_phase "Preparing the disk"
+hw_install_screen
+hw_phase "Preparing the disk"
 exec >>/tmp/installer.log 2>&1
-trap nsi_fail ERR
-nsi_spin_start
+trap hw_fail ERR
+hw_log_start
 echo "==> Wiping $DISK..."
 swapoff -a || true
 umount -R /mnt 2>/dev/null || true
@@ -878,7 +995,7 @@ if [ "$GPU_HYBRID_LAPTOP" = 1 ]; then
 fi
 echo "    Driver target(s): ${GPU_SUMMARY[*]}"
 
-nsi_phase "Installing the HyperWebster desktop (this is the slow part)"
+hw_phase "Installing the HyperWebster desktop (this is the slow part)"
 pacstrap -C /tmp/hyperwebster-pacman.conf -K /mnt "${BASE_PKGS[@]}" "${GPU_PKGS[@]}"
 
 echo "==> Generating fstab..."
@@ -897,7 +1014,7 @@ else
   echo "    WARNING: could not harden ESP mount perms in fstab — review /boot fmask/dmask."
 fi
 
-nsi_phase "Configuring the system"
+hw_phase "Configuring the system"
 echo "==> Configuring base system in chroot..."
 # Localisation from the prompts (written from outside the chroot — simpler
 # than threading variables through a quoted heredoc).
@@ -1063,7 +1180,7 @@ if printf '%s' "$SYS_VENDOR" | grep -qi acer \
   fi
 fi
 
-nsi_phase "Installing the bootloader"
+hw_phase "Installing the bootloader"
 echo "==> Installing Limine bootloader (UEFI)..."
 if [ "$USE_LUKS" -eq 0 ]; then
   BTRFS_UUID=$(blkid -s UUID -o value "$BTRFS_DEV")
@@ -1188,7 +1305,7 @@ fi
 # The snapshot tools come PREBUILT from the omarchy repo (bundled in the
 # offline repo) — installed in a second pacstrap now that their config exists.
 # KEEP IN SYNC with LIMINE_TOOLS in the builder.
-nsi_phase "Installing snapshot + boot tooling"
+hw_phase "Installing snapshot + boot tooling"
 pacstrap -C /tmp/hyperwebster-pacman.conf /mnt limine-snapper-sync limine-mkinitcpio-hook
 
 # snapper "root" config. /.snapshots is already a mounted @snapshots subvol,
@@ -1224,7 +1341,7 @@ fi
 # Full path: limine-mkinitcpio-hook ships a /usr/local/bin/mkinitcpio wrapper
 # that PROMPTS [Y/n] after -P ("run limine-mkinitcpio now?") — an interactive
 # blocker mid-install. limine-update below regenerates the entries anyway.
-nsi_phase "Building the boot image"
+hw_phase "Building the boot image"
 arch-chroot /mnt /usr/bin/mkinitcpio -P
 if [ "$SNAPSHOTS_OK" = 1 ]; then
   if arch-chroot /mnt limine-update; then
@@ -1646,6 +1763,11 @@ source = ~/.config/hypr/workspaces.conf
 windowrule = float true, match:class TUI\.float
 windowrule = size 1100 700, match:class TUI\.float
 
+# iPhone USB tether TUI (omatether)
+windowrule = float on, match:class ^(omatether)$
+windowrule = center on, match:class ^(omatether)$
+windowrule = size 520 400, match:class ^(omatether)$
+
 # Passwordless-sudo password prompt (Settings -> Services). Dedicated class +
 # centered/pinned floating window; SudoToggleRow also dispatches `focuswindow` so
 # the prompt grabs keyboard focus (without it the prompt missed keystrokes and
@@ -1734,7 +1856,7 @@ install -m 644 "$HYPERWEBSTER_PAYLOAD/vendor/fastfetch-logo.txt" \
 # post-install. The packages came from pacstrap; everything else comes from
 # the layer tree itself, so the ISO and a live-updated box are identical.
 # Conf fragments are appended FROM the extracted tree so they cannot drift.
-nsi_phase "Applying the HyperWebster layer"
+hw_phase "Applying the HyperWebster layer"
 echo "==> Installing HyperWebster layer (os-updates round)..."
 tar -xzf "$HYPERWEBSTER_PAYLOAD/vendor/hyperwebster-layer.tar.gz" -C "$M_HOME/.local/share"
 LAYER="$M_HOME/.local/share/hyperwebster"
@@ -2070,6 +2192,12 @@ echo "==> Installing LUKS TPM enrollment helper..."
 arch-chroot /mnt sh "$USER_HOME/.local/share/hyperwebster/luks-tpm-unlock/install-luks-tpm-unlock.sh" \
   || echo "    (luks-tpm-unlock install failed)"
 
+# --- omatether (iPhone USB tether; NetworkManager + networkd coexistence) ----
+echo "==> Installing iPhone USB tether (omatether)..."
+arch-chroot /mnt env HOME="$USER_HOME" SUDO_USER="$USERNAME" \
+  sh "$USER_HOME/.local/share/hyperwebster/iphone-tether/install-iphone-tether.sh" \
+  || echo "    (iphone-tether install failed — enable later via Additions)"
+
 # --- Chimera / Deckify gaming helpers (opt-in install via hyperwebster-deckify-install).
 echo "==> Installing Chimera/Deckify gaming helpers..."
 arch-chroot /mnt sh "$USER_HOME/.local/share/hyperwebster/chimera-deckify-gaming/install-chimera-deckify-gaming.sh" \
@@ -2292,27 +2420,27 @@ arch-chroot /mnt chown -R "$USERNAME:$USERNAME" "$USER_HOME/.local/state" 2>/dev
 # The file:// repo must not leak into the installed system: drop its synced db
 # (the [hyperwebster] repo is not in the target's pacman.conf) and clear the package
 # cache copies pacstrap made (~3.5GB — the install media still has them all).
-nsi_phase "Finishing up"
+hw_phase "Finishing up"
 echo "==> Cleaning install-time package cache..."
 rm -f /mnt/var/lib/pacman/sync/hyperwebster.*
 rm -f /mnt/var/cache/pacman/pkg/*
 
-# Heavy phase done — stop the spinner, restore on-screen output, show a centred
-# completion screen.
-nsi_spin_stop
+# Heavy phase done — stop the log panel, restore on-screen output, show completion.
+hw_log_stop
 trap - ERR
 exec >/dev/tty 2>&1
 clear
-tcecho "HyperWebster install complete" "$NSI_GB" "$NSI_R"
+hw_draw_logo
+tcecho "HyperWebster OS install complete" "$HW_GB" "$HW_R"
 printf '\n' >/dev/tty
-tcecho "Remove the install media and reboot." "$NSI_B" "$NSI_R"
+tcecho "Remove the install media and reboot." "$HW_B" "$HW_R"
 printf '\n' >/dev/tty
-tcecho "First boot goes straight to the graphical login (SDDM, themed) —" "$NSI_DIM" "$NSI_R"
-tcecho "log in and the themed Hyprland desktop starts. No internet needed;" "$NSI_DIM" "$NSI_R"
-tcecho "run 'sudo pacman -Syu' once when you're online to sync databases." "$NSI_DIM" "$NSI_R"
+tcecho "First boot goes straight to the graphical login (SDDM, themed) —" "$HW_DIM" "$HW_R"
+tcecho "log in and the themed Hyprland desktop starts. No internet needed;" "$HW_DIM" "$HW_R"
+tcecho "run 'sudo pacman -Syu' once when you're online to sync databases." "$HW_DIM" "$HW_R"
 printf '\n' >/dev/tty
 PROMPT="Press ENTER to reboot now (Ctrl+C for a shell)... "
-printf '%s' "$(nsi_pad "${#PROMPT}")" >/dev/tty
+printf '%s' "$(hw_pad "${#PROMPT}")" >/dev/tty
 read -rp "$PROMPT" </dev/tty
 # Flush ALL pending writes to disk before unmounting. With the btrfs subvolume
 # layout there are 5 mounts under /mnt; `umount -R` can fail partway (it's
@@ -2661,6 +2789,12 @@ xorriso -osirrox on -indev "$STOCK_ISO" \
 echo "==> Unsquashing airootfs (slow: ~1 min)..."
 sudo unsquashfs -d "$SFS_DIR" "$WORK/airootfs-stock.sfs" >/dev/null
 
+echo "==> Installing live-environment packages (Omarchy-style installer UI)..."
+sudo pacman -r "$SFS_DIR" -Sy --noconfirm \
+  --config "$OFFLINE/dl-pacman.conf" \
+  --cachedir "$OFFLINE/iso/repo" \
+  --needed "${LIVE_ISO_PKGS[@]}" 2>&1 | tail -5
+
 # ---- inject payload ------------------------------------------------------
 if [ "$HAVE_KEY" = 1 ]; then
   echo "==> Staging master SSH key for first-boot SSH access..."
@@ -2768,7 +2902,8 @@ xorriso \
   -end 2>&1 | tail -5
 
 # ---- cleanup ------------------------------------------------------------
-sudo chown "$INVOKING_USER:$INVOKING_GROUP" "$OUT_ISO"
+sudo chown "${INVOKING_UID:-$(id -u "$INVOKING_USER")}:${INVOKING_GID:-$(id -g "$INVOKING_USER")}" "$OUT_ISO" 2>/dev/null \
+  || sudo chown "$INVOKING_USER:$INVOKING_GROUP" "$OUT_ISO"
 sudo rm -rf "$WORK"
 
 echo
