@@ -122,10 +122,17 @@ run_migrations() {
   shopt -s nullglob
   local files=("$MIG_DIR"/*.sh)
   shopt -u nullglob
-  # Defensive: older pull_layer() bug doubled hyperwebster-update in MIG_DIR.
+  # Defensive: older pull_layer() bug set ROOT one level too deep so MIG_DIR pointed
+  # at hyperwebster-update/hyperwebster-update/migrations (empty). Recover the
+  # canonical path relative to the true layer root.
   if [ ${#files[@]} -eq 0 ]; then
-    local alt="$UPDATE_DIR/migrations"
-    if [ "$alt" != "$MIG_DIR" ] && [ -d "$alt" ]; then
+    local alt=""
+    if [ -d "$(dirname -- "$ROOT")/hyperwebster-update/migrations" ]; then
+      alt="$(dirname -- "$ROOT")/hyperwebster-update/migrations"
+    elif [ -d "$ROOT/hyperwebster-update/migrations" ]; then
+      alt="$ROOT/hyperwebster-update/migrations"
+    fi
+    if [ -n "$alt" ] && [ "$alt" != "$MIG_DIR" ]; then
       shopt -s nullglob
       files=("$alt"/*.sh)
       shopt -u nullglob

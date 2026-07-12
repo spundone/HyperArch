@@ -1,0 +1,26 @@
+{
+  "name": "HyperWebster OS ISO Builder",
+  "build": {
+    "dockerfile": "../docker/Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/build",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/build,type=bind",
+  "remoteUser": "root",
+  "runArgs": [
+    "--privileged",
+    "--cap-add=SYS_ADMIN",
+    "--security-opt=seccomp=unconfined"
+  ],
+  "containerEnv": {
+    "HYPERWEBSTER_BUILD_UID": "${localEnv:UID}",
+    "HYPERWEBSTER_BUILD_GID": "${localEnv:GID}",
+    "HYPERWEBSTER_BUILD_USER": "${localEnv:USER}"
+  },
+  "postCreateCommand": "chmod +x build.sh hyperwebster.sh scripts/*.sh || true",
+  "customizations": {
+    "vscode": {
+      "extensions": ["mads-hartmann.bash-ide-vscode"]
+    }
+  }
+}

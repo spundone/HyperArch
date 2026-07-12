@@ -25,7 +25,9 @@ See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware guidance and
   look; **frosted glass blur on by default** (`hyperwebster-blur-toggle disable` for flat).
   Optional rounded corners via `hyperwebster-rounding-toggle enable`.
 - **LUKS2 disk encryption** with optional **TPM2 auto-unlock** at install
-  (passphrase sealed in TPM; remains fallback). Plymouth may show briefly before SDDM.
+  (passphrase sealed in TPM; remains fallback). If TPM unlock fails, Plymouth
+  shows an Omarchy-style graphical passphrase dialog (lock + entry + bullets)
+  on the Starman splash - USB keyboard required.
 - **Themed SDDM login** that mirrors the desktop palette; auto-syncs when you
   switch light/dark mode.
 - **Limine boot menu** with UKI snapshots **plus a Starman (Gaming / Steam)**
@@ -40,7 +42,9 @@ See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware guidance and
   `Super+D` dashboard, `Super+Grave` workspace overview.
 - **Omarchy-inspired utilities** - `omarchy-send` LAN sharing (`Super+Ctrl+S`),
   media transcode (`Super+Ctrl+Period`), OCR capture (`Super+Ctrl+Print`),
-  night light toggle (`Super+Ctrl+N`), Omarchy bash setup + `[omarchy]` repo.
+  night light toggle (`Super+Ctrl+N`), Omarchy bash setup + `[omarchy]` repo,
+  **iPhone USB tether** via [omatether](https://github.com/28allday/omatether)
+  (`omatether` / Settings → Additions).
 - **Software story**: `yay` (AUR), **Shelly** on `Super+I`, flatpak preconfigured.
 - **Btrfs + bootable snapshots** via snapper/snap-pac; **btrfs-assistant** GUI +
   timeline snapshots; roll back from Limine.
@@ -54,14 +58,51 @@ See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware guidance and
 
 ## Build the ISO
 
-On an **Arch Linux** host with internet:
+**Cross-platform entry point:** `./build.sh` runs natively on Arch, or inside an
+Arch container on macOS / Windows / other Linux.
+
+### Arch Linux (native)
 
 ```bash
 sudo pacman -S --needed git libisoburn squashfs-tools coreutils devtools pacman-contrib reflector
 git clone https://github.com/spundone/HyperWebster-OS.git
 cd HyperWebster-OS
-./hyperwebster.sh
+./build.sh
+# or: ./hyperwebster.sh
 ```
+
+### macOS (OrbStack or Docker Desktop)
+
+1. Install [OrbStack](https://orbstack.dev/) (recommended) or
+   [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/).
+2. Clone the repo and run:
+
+```bash
+chmod +x build.sh scripts/build-in-container.sh
+./build.sh
+```
+
+Needs ~30 GB free disk. First build downloads the stock Arch ISO (~1.3 GB) plus
+packages. Output: `hyperwebster-arch-YYYYMMDD.iso` in the repo root.
+
+### Windows (WSL2)
+
+1. Install WSL2 (Ubuntu) and [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+   with **WSL integration** enabled for your distro.
+2. Clone the repo inside WSL (not a `/mnt/c/...` path - bind mounts from NTFS are slow):
+
+```bash
+git clone https://github.com/spundone/HyperWebster-OS.git
+cd HyperWebster-OS
+chmod +x build.sh scripts/build-in-container.sh
+./build.sh
+```
+
+### Dev container / force container
+
+- VS Code / Cursor: Reopen in Container (`.devcontainer/devcontainer.json`), then
+  `./hyperwebster.sh`.
+- Force container on Arch: `HYPERWEBSTER_FORCE_CONTAINER=1 ./build.sh`.
 
 If no stock Arch ISO (`archlinux-*.iso`) is in the repo root, the script **downloads
 the latest automatically** from official mirrors (~1.3 GB). To supply your own ISO
@@ -131,6 +172,7 @@ See `os updates/omarchy-extras/README.md` for the full mapping.
 |---------|---------------|-------|
 | Keybinding layout | `Super+K` cheatsheet | Full Omarchy default map on caelestia |
 | LAN file share | `Super+Ctrl+S`, `omarchy-send` | [28allday/omarchy-send](https://github.com/28allday/omarchy-send) |
+| iPhone USB tether | `omatether` | [28allday/omatether](https://github.com/28allday/omatether); NM + networkd coexistence |
 | Media transcode | `Super+Ctrl+Period` | fuzzel menus; `omarchy-transcode` shim for bash aliases |
 | OCR capture | `Super+Ctrl+Print` | grim + tesseract |
 | Night light | `Super+Ctrl+N` | hyprsunset; Quick Settings tile too |

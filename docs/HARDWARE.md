@@ -120,8 +120,10 @@ Verify TPM: `systemd-cryptenroll --tpm2-device=list` and `tpm2_pcrread sha256:7`
 #### Controller / TV setups
 
 When TPM auto-unlock works, cold boot reaches SDDM with no keyboard. When it
-fails, Plymouth shows a **graphical passphrase field** on the Starman splash —
-plug a **USB keyboard**; game controllers cannot enter the passphrase.
+fails, Plymouth shows an **Omarchy-style unlock dialog** (lock icon, entry field,
+bullet dots) on the Starman splash with Tokyo Night colors - plug a **USB
+keyboard**; game controllers cannot enter the passphrase. Press **Esc** for the
+TTY cryptsetup prompt if needed.
 
 #### Boot flow (LUKS + TPM)
 
