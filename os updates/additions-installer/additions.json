@@ -135,6 +135,17 @@
       "disable": "hyperwebster-omarchy-extras-toggle disable"
     },
     {
+      "id": "iphone-tether",
+      "kind": "toggle",
+      "category": "system",
+      "name": "iPhone USB Tether",
+      "desc": "Use iPhone internet over USB (omatether TUI)",
+      "icon": "phone_iphone",
+      "check": "test -f /etc/systemd/network/10-iphone-tether.network && command -v omatether >/dev/null",
+      "enable": "sudo sh \"$HOME/.local/share/hyperwebster/iphone-tether/install-iphone-tether.sh\"; echo 'Then: omatether pair'",
+      "disable": "sudo rm -f /etc/systemd/network/10-iphone-tether.network; sudo networkctl reload 2>/dev/null || true; echo 'omatether binary left installed; network profile removed'"
+    },
+    {
       "id": "drive-automount",
       "kind": "toggle",
       "category": "system",
