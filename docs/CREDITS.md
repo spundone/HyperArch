@@ -36,6 +36,11 @@ them. Please support the originals; each remains under its own licence.
   the install menu (`Super+Alt+Space`) adapted in `omarchy-launcher`.
 - **[omarchy-send](https://github.com/28allday/omarchy-send)** - LocalSend-compatible
   LAN file transfer (vendored binary).
+- **[omatether](https://github.com/28allday/omatether)** - iPhone USB tethering
+  (adapted for NetworkManager coexistence; kitty launcher).
+- **[Omarchy Plymouth unlock UX](https://github.com/basecamp/omarchy)** - lock /
+  entry / bullet passphrase dialog adapted for HyperWebster Starman splash when
+  TPM auto-unlock fails.
 - **cryptsetup / LUKS** + **systemd-cryptenroll** - full-disk encryption with
   optional TPM2 auto-unlock.
 
