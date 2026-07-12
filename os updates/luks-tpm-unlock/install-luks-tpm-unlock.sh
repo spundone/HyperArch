@@ -15,6 +15,10 @@ if [ -d /usr/share/plymouth/themes/hyperwebster ] && [ -f "$HERE/plymouth/hyperw
     /usr/share/plymouth/themes/hyperwebster/hyperwebster.script
   install -Dm0644 "$HERE/plymouth/hyperwebster.plymouth" \
     /usr/share/plymouth/themes/hyperwebster/hyperwebster.plymouth
+  for f in logo.png lock.png entry.png bullet.png progress_bar.png progress_box.png; do
+    [ -f "$HERE/plymouth/$f" ] && install -Dm0644 "$HERE/plymouth/$f" \
+      "/usr/share/plymouth/themes/hyperwebster/$f"
+  done
   if command -v plymouth-set-default-theme >/dev/null 2>&1; then
     plymouth-set-default-theme hyperwebster 2>/dev/null || true
   fi

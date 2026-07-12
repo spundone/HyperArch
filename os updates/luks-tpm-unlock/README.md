@@ -16,8 +16,9 @@ You can reuse your **login password** as the LUKS fallback passphrase so you onl
 remember one secret when TPM unlock is unavailable.
 
 `mkinitcpio` uses the **`sd-encrypt`** hook (systemd in initramfs) with
-**`plymouth`** before it so the HyperWebster splash shows a graphical passphrase
-prompt instead of dropping to a TTY. Limine kernel cmdline uses
+**`plymouth`** before it so the HyperWebster splash shows an Omarchy-style
+graphical passphrase dialog (lock icon, entry field, bullet dots) instead of
+dropping to a TTY. Limine kernel cmdline uses
 **`rd.luks.name=LUKS-UUID=mappername`**, **`rd.luks.options=timeout=0`**, and
 **`rootflags=subvol=@,x-systemd.device-timeout=0`** so the prompt does not time
 out after ~90 seconds on couch/TV setups.
