@@ -244,6 +244,16 @@ rm -rf offline/dl-db
 HYPERWEBSTER_REFRESH_MIRRORS=1 ./hyperwebster.sh
 ```
 
+If you see `build-mirrorlist could not be read` during an AUR chroot build, the
+chroot's pacman.conf still pointed at a deleted host path. Re-run `./hyperwebster.sh`
+(the builder heals this); or wipe the chroot and rebuild AUR packages:
+
+```bash
+sudo rm -rf offline/chroot
+rm -f offline/aur/.built-*
+./hyperwebster.sh
+```
+
 For a full package refresh (slow), delete the entire `offline/` directory.
 
 ## Credits

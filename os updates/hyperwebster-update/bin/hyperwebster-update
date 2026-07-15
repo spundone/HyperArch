@@ -46,8 +46,8 @@ Usage: hyperwebster-update [options]
 
 By default hyperwebster-update pulls the latest HyperWebster layer from GitHub
 (main branch) into ~/.local/share/hyperwebster/, then runs any new migrations.
-Skips download/sync when the remote commit and on-disk files are unchanged.
-Override the URL with HYPERWEBSTER_LAYER_URL or ~/.config/hyperwebster/layer-source.conf.
+Skips rsync when the downloaded tree matches on-disk files. Retries migrations
+once with --force-pull after a failure. Override the URL with HYPERWEBSTER_LAYER_URL or ~/.config/hyperwebster/layer-source.conf.
 EOF
       exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
@@ -122,9 +122,19 @@ pull_layer() {
 }
 
 # --- 5. migrations (re-apply / advance the HyperWebster layer) ----------------
-run_migrations() {
-  mkdir -p "$STATE_DIR"; touch "$STATE"
-  local m base applied=0 skipped=0 failed=0
+prune_stale_applied() {
+  local tmp base
+  [ -f "$STATE" ] || return 0
+  tmp=$(mktemp)
+  while IFS= read -r base || [ -n "$base" ]; do
+    [ -n "$base" ] || continue
+    [ -f "$MIG_DIR/$base" ] && printf '%s\n' "$base"
+  done < "$STATE" > "$tmp"
+  mv "$tmp" "$STATE"
+}
+
+run_migrations_once() {
+  local m base applied=0 skipped=0 rc
   shopt -s nullglob
   local files=("$MIG_DIR"/*.sh)
   shopt -u nullglob
@@ -164,9 +174,9 @@ run_migrations() {
       grep -qxF "$base" "$STATE" 2>/dev/null || echo "$base" >> "$STATE"
       applied=$((applied + 1))
     else
-      failed=$((failed + 1))
-      warn "migration $base FAILED (exit $?)"
-      exit 1
+      rc=$?
+      warn "migration $base FAILED (exit $rc)"
+      return 1
     fi
   done
   if [ "$FORCE_MIGRATIONS" = 1 ] && [ "$applied" -gt 0 ]; then
@@ -180,6 +190,25 @@ run_migrations() {
   else
     log "0 migrations in tree"
   fi
+  return 0
+}
+
+run_migrations() {
+  mkdir -p "$STATE_DIR"; touch "$STATE"
+  prune_stale_applied
+  if run_migrations_once; then
+    return 0
+  fi
+  if [ "$DO_PULL" = 1 ] && [ "$FORCE_PULL" != 1 ] && [ "${MIGRATION_PULL_RETRY:-0}" != 1 ]; then
+    warn "migration failed — forcing layer refresh and retrying once"
+    MIGRATION_PULL_RETRY=1
+    FORCE_PULL=1
+    pull_layer || true
+    prune_stale_applied
+    run_migrations_once || exit 1
+    return 0
+  fi
+  exit 1
 }
 
 # --- 6. caelestia dotfiles (opt-in) -------------------------------------------

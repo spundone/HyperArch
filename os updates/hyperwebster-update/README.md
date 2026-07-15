@@ -8,7 +8,7 @@ HyperWebster ships a forward-only migration system modeled on Omarchy's `omarchy
 |---------|------------------|
 | Official + AUR packages | `hyperwebster-update` runs `pacman -Syu` via an AUR helper (bootstraps **yay** if none is installed) |
 | Safety | Takes a **snapper** snapshot first (when btrfs/snapper is present) |
-| The HyperWebster layer | **Pulled from GitHub** (`main` branch) into `~/.local/share/hyperwebster/`; skips download/sync when commit and files match, then **forward-only migrations** |
+| The HyperWebster layer | **Pulled from GitHub** (`main` branch) into `~/.local/share/hyperwebster/`; skips rsync when tarball matches on-disk files, then **forward-only migrations** (auto force-pull + retry once on migration failure) |
 | Caelestia dotfiles | Opt-in `--caelestia` (upstream git remote); off by default |
 | Offline / ISO snapshot | `--no-pull` skips the GitHub fetch |
 

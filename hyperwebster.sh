@@ -236,21 +236,41 @@ BUILD_MIRRORLIST="$OFFLINE/build-mirrorlist"
 # Rank Arch mirrors for ISO-build downloads (offline closure + AUR chroot).
 # Override with HYPERWEBSTER_MIRRORLIST=/path/to/mirrorlist. Set
 # HYPERWEBSTER_REFRESH_MIRRORS=1 to force re-ranking on the next build.
+# Copy ranked mirrors into any existing build chroot. chroot pacman.conf must
+# Include /etc/pacman.d/mirrorlist (not a host path) — arch-nspawn cannot read
+# $OFFLINE/build-mirrorlist unless that path is bind-mounted.
+sync_mirrorlist_into_chroot() {
+  local root="$OFFLINE/chroot/root"
+  [ -d "$root" ] || return 0
+  [ -s "$BUILD_MIRRORLIST" ] || return 0
+  sudo mkdir -p "$root/etc/pacman.d"
+  sudo cp "$BUILD_MIRRORLIST" "$root/etc/pacman.d/mirrorlist"
+  if [ -f "$root/etc/pacman.conf" ]; then
+    # Heal older chroots that baked Include = $OFFLINE/build-mirrorlist.
+    sudo sed -i \
+      -e 's|^Include = .*/offline/build-mirrorlist|Include = /etc/pacman.d/mirrorlist|' \
+      -e 's|^Include = .*build-mirrorlist|Include = /etc/pacman.d/mirrorlist|' \
+      "$root/etc/pacman.conf"
+  fi
+}
+
 prepare_build_mirrorlist() {
+  mkdir -p "$OFFLINE"
   if [ -n "${HYPERWEBSTER_MIRRORLIST:-}" ]; then
     echo "==> Using custom build mirrorlist: $HYPERWEBSTER_MIRRORLIST"
     cp "$HYPERWEBSTER_MIRRORLIST" "$BUILD_MIRRORLIST"
+    sync_mirrorlist_into_chroot
     return 0
   fi
 
   if [ -f "$BUILD_MIRRORLIST" ] && [ -z "${HYPERWEBSTER_REFRESH_MIRRORS:-}" ]; then
     echo "    Reusing cached build mirrorlist ($BUILD_MIRRORLIST)."
     echo "    (set HYPERWEBSTER_REFRESH_MIRRORS=1 to re-rank, or delete the file)"
+    sync_mirrorlist_into_chroot
     return 0
   fi
 
   echo "==> Preparing Arch mirrorlist for ISO build downloads..."
-  mkdir -p "$OFFLINE"
   if command -v reflector >/dev/null 2>&1; then
     echo "    Ranking mirrors with reflector..."
     if ! reflector --latest 20 --sort rate --download-timeout 30 --save "$BUILD_MIRRORLIST" \
@@ -277,6 +297,7 @@ Server = https://us.arch.niranjan.co/$repo/os/$arch
 Server = https://arch.mirror.constant.com/$repo/os/$arch
 MIRRORS
   fi
+  sync_mirrorlist_into_chroot
 }
 
 write_dl_pacman_conf() {
@@ -2572,7 +2593,34 @@ build_offline_payload() {
   # local bootstrap repo: arch-nspawn auto-bind-mounts file:// Server dirs, so
   # each built package becomes resolvable by the next build (caelestia-shell
   # needs caelestia-cli + quickshell-git etc.).
+  #
+  # Mirror Include must be /etc/pacman.d/mirrorlist (inside the chroot). A host
+  # path like $OFFLINE/build-mirrorlist works for host-side pacman during
+  # mkarchroot, but fails inside arch-nspawn ("config file ... could not be
+  # read"). Ranked mirrors are copied into the chroot by sync_mirrorlist_into_chroot.
   cat > "$OFFLINE/chroot-pacman.conf" <<CHROOTPAC
+[options]
+Architecture = auto
+SigLevel = Required DatabaseOptional
+LocalFileSigLevel = Optional
+ParallelDownloads = 8
+DisableDownloadTimeout
+
+[hyperwebster]
+SigLevel = Optional TrustAll
+Server = file://$OFFLINE/iso/repo
+
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+CHROOTPAC
+  if [ ! -d "$OFFLINE/chroot/root" ]; then
+    echo "==> Creating clean build chroot (devtools mkarchroot)..."
+    mkdir -p "$OFFLINE/chroot"
+    # Host-side bootstrap still uses the ranked BUILD_MIRRORLIST path.
+    cat > "$OFFLINE/chroot-pacman-host.conf" <<CHROOTHOST
 [options]
 Architecture = auto
 SigLevel = Required DatabaseOptional
@@ -2589,11 +2637,13 @@ Include = $BUILD_MIRRORLIST
 
 [extra]
 Include = $BUILD_MIRRORLIST
-CHROOTPAC
-  if [ ! -d "$OFFLINE/chroot/root" ]; then
-    echo "==> Creating clean build chroot (devtools mkarchroot)..."
-    mkdir -p "$OFFLINE/chroot"
-    sudo mkarchroot -C "$OFFLINE/chroot-pacman.conf" "$OFFLINE/chroot/root" base-devel
+CHROOTHOST
+    sudo mkarchroot -C "$OFFLINE/chroot-pacman-host.conf" "$OFFLINE/chroot/root" base-devel
+  fi
+  # Install in-chroot mirrorlist + rewrite pacman.conf Include for nspawn.
+  sync_mirrorlist_into_chroot
+  if [ -f "$OFFLINE/chroot/root/etc/pacman.conf" ]; then
+    sudo cp "$OFFLINE/chroot-pacman.conf" "$OFFLINE/chroot/root/etc/pacman.conf"
   fi
 
   # ---- AUR packages (clean-chroot builds, dependency order) ----------------
