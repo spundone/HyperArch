@@ -233,6 +233,41 @@ trap 'sudo rm -rf "$WORK" 2>/dev/null || true' EXIT
 
 BUILD_MIRRORLIST="$OFFLINE/build-mirrorlist"
 
+# makepkg / makechrootpkg refuse UID 0. Container builds (./build.sh via Docker
+# / OrbStack / WSL) enter as root — drop to a passwordless-sudo builder for
+# those steps. Native Arch builds as a regular user leave MAKEPKG_USER empty.
+MAKEPKG_USER=""
+ensure_makepkg_user() {
+  if [ "$(id -u)" -ne 0 ]; then
+    MAKEPKG_USER=""
+    return 0
+  fi
+  local u="${HYPERWEBSTER_MAKEPKG_USER:-hwbuilder}"
+  if ! id -u "$u" >/dev/null 2>&1; then
+    echo "==> Creating non-root build user ($u) for makepkg/makechrootpkg..."
+    useradd -m -U "$u"
+  fi
+  if [ ! -f "/etc/sudoers.d/90-$u" ]; then
+    echo "$u ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/90-$u"
+    chmod 0440 "/etc/sudoers.d/90-$u"
+  fi
+  MAKEPKG_USER="$u"
+}
+
+# Run a command in $1 as MAKEPKG_USER (or the invoking user). Remaining args
+# are the command. makechrootpkg must NOT be wrapped in sudo — it elevates
+# itself; running it as root fails.
+run_as_makepkg_user() {
+  local workdir="$1"
+  shift
+  if [ -n "$MAKEPKG_USER" ]; then
+    chown -R "$MAKEPKG_USER:$MAKEPKG_USER" "$workdir"
+    ( cd "$workdir" && sudo -u "$MAKEPKG_USER" -- "$@" )
+  else
+    ( cd "$workdir" && "$@" )
+  fi
+}
+
 # Rank Arch mirrors for ISO-build downloads (offline closure + AUR chroot).
 # Override with HYPERWEBSTER_MIRRORLIST=/path/to/mirrorlist. Set
 # HYPERWEBSTER_REFRESH_MIRRORS=1 to force re-ranking on the next build.
@@ -263,7 +298,7 @@ prepare_build_mirrorlist() {
     return 0
   fi
 
-  if [ -f "$BUILD_MIRRORLIST" ] && [ -z "${HYPERWEBSTER_REFRESH_MIRRORS:-}" ]; then
+  if [ -s "$BUILD_MIRRORLIST" ] && [ -z "${HYPERWEBSTER_REFRESH_MIRRORS:-}" ]; then
     echo "    Reusing cached build mirrorlist ($BUILD_MIRRORLIST)."
     echo "    (set HYPERWEBSTER_REFRESH_MIRRORS=1 to re-rank, or delete the file)"
     sync_mirrorlist_into_chroot
@@ -316,6 +351,9 @@ Server = file://$OFFLINE/iso/repo
 Include = $BUILD_MIRRORLIST
 
 [extra]
+Include = $BUILD_MIRRORLIST
+
+[multilib]
 Include = $BUILD_MIRRORLIST
 
 [omarchy]
@@ -2486,6 +2524,7 @@ __INSTALLER_PAYLOAD__
 build_offline_payload() {
   echo "==> Building offline payload (cached in $OFFLINE)..."
   mkdir -p "$OFFLINE/iso/repo" "$OFFLINE/iso/vendor" "$OFFLINE/aur"
+  ensure_makepkg_user
   prepare_build_mirrorlist
   write_dl_pacman_conf
 
@@ -2615,6 +2654,9 @@ Include = /etc/pacman.d/mirrorlist
 
 [extra]
 Include = /etc/pacman.d/mirrorlist
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
 CHROOTPAC
   if [ ! -d "$OFFLINE/chroot/root" ]; then
     echo "==> Creating clean build chroot (devtools mkarchroot)..."
@@ -2636,6 +2678,9 @@ Server = file://$OFFLINE/iso/repo
 Include = $BUILD_MIRRORLIST
 
 [extra]
+Include = $BUILD_MIRRORLIST
+
+[multilib]
 Include = $BUILD_MIRRORLIST
 CHROOTHOST
     sudo mkarchroot -C "$OFFLINE/chroot-pacman-host.conf" "$OFFLINE/chroot/root" base-devel
@@ -2691,7 +2736,8 @@ CHROOTHOST
     # without this, packages repo-added to [hyperwebster] after mkarchroot are
     # invisible and chained builds fail with "target not found".
     sudo arch-nspawn "$OFFLINE/chroot/root" pacman -Syu --noconfirm
-    ( cd "$OFFLINE/aur/$name" && sudo makechrootpkg -c -r "$OFFLINE/chroot" )
+    # makechrootpkg must run as a non-root user (it sudoes internally).
+    run_as_makepkg_user "$OFFLINE/aur/$name" makechrootpkg -c -r "$OFFLINE/chroot"
     for p in "$OFFLINE/aur/$name"/*.pkg.tar.zst; do
       [[ "$(basename "$p")" == *-debug-* ]] && continue
       cp -f "$p" "$OFFLINE/iso/repo/"
@@ -2717,9 +2763,14 @@ CHROOTHOST
     fi
     meta_tmp=$(mktemp -d /tmp/hyperwebster-meta.XXXXXX)
     cp -a "$OFFLINE/aur/caelestia" "$meta_tmp/caelestia"   # keep .git (pkgver)
-    ( cd "$meta_tmp/caelestia" && rm -f ./*.pkg.tar.zst \
-        && BUILDDIR="$meta_tmp/build" makepkg -df --noconfirm )
+    mkdir -p "$meta_tmp/build"
+    rm -f "$meta_tmp/caelestia"/*.pkg.tar.zst
+    # Workdir is meta_tmp so BUILDDIR (sibling of caelestia/) is writable.
+    run_as_makepkg_user "$meta_tmp" \
+      env BUILDDIR="$meta_tmp/build" \
+      sh -c 'cd caelestia && makepkg -df --noconfirm'
     for p in "$meta_tmp/caelestia"/*.pkg.tar.zst; do
+      [ -f "$p" ] || continue
       cp -f "$p" "$OFFLINE/iso/repo/"
       repo-add -R "$OFFLINE/iso/repo/hyperwebster.db.tar.gz" "$OFFLINE/iso/repo/$(basename "$p")"
     done

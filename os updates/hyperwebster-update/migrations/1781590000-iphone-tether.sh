@@ -7,4 +7,4 @@ if [ ! -f "$SCRIPT" ]; then
   echo "iphone-tether: layer files missing — run hyperwebster-layer-pull" >&2
   exit 1
 fi
-sh "$SCRIPT"
+sudo sh "$SCRIPT"
