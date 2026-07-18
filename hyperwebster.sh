@@ -415,7 +415,8 @@ if [ -f "$MARKER" ]; then
   echo
   exec /bin/bash
 fi
-touch "$MARKER"
+# Do NOT touch MARKER yet — Esc/cancel/preflight failure must allow retry.
+# Marker is set just before wipefs (destructive work begins).
 
 # Mirror stdout/stderr to /tmp/installer.log. If the script aborts, the user
 # can switch to tty2, log in as root, and `cat /tmp/installer.log` to see the
@@ -427,11 +428,19 @@ if [ ! -d /sys/firmware/efi ]; then
   exec /bin/bash
 fi
 
-clear
+clear >/dev/tty
+
+# Restore cursor / log panel on interrupt (menus and install log hide the cursor).
+hw_ui_cleanup() {
+  printf '\033[?25h' >/dev/tty 2>/dev/null || true
+  [ -n "${HW_LOG_PID:-}" ] && { kill "$HW_LOG_PID" 2>/dev/null || true; wait "$HW_LOG_PID" 2>/dev/null || true; HW_LOG_PID=""; }
+}
+trap hw_ui_cleanup INT TERM
 
 # --- HyperWebster OS installer UI (Tokyo Night + gum, bash fallback). ------------
 # Charm-style menus when gum is present; ANSI fallback otherwise. Redraws go to
-# /dev/tty so the tee'd installer.log stays clean.
+# /dev/tty so the tee'd installer.log stays clean. ASCII-only chrome: live ISO
+# console fonts often lack · ❯ → and box-drawing glyphs.
 HW_CYAN=$'\033[38;5;81m'      # gum confirm prompt (foreground 6)
 HW_GREEN=$'\033[38;5;114m'    # gum logo / accent (foreground 2)
 HW_G=$'\033[38;5;114m'        # alias kept for older call sites
@@ -443,13 +452,14 @@ HW_B=$'\033[1m'
 HW_R=$'\033[0m'
 
 HW_STEP=0
-HW_TOTAL=4   # Account · Region · Disk · Security
+HW_TOTAL=4   # Account / Region / Disk / Security
 
 # Console width (stdout is tee'd — read from the real tty). Default 80.
 hw_cols() {
   local c; c=$(stty size </dev/tty 2>/dev/null | awk '{print $2}')
   case "$c" in ''|*[!0-9]*) c=80 ;; esac
-  [ "$c" -ge 20 ] 2>/dev/null || c=80
+  # Use the real width when narrow; only invent 80 when stty failed.
+  if [ "$c" -lt 20 ] 2>/dev/null; then c=20; fi
   printf '%s' "$c"
 }
 hw_pad() {
@@ -481,6 +491,8 @@ LOGO_WIDTH=20
 for _hw_l in "${STARMAN_LINES[@]}"; do
   [ "${#_hw_l}" -gt "$LOGO_WIDTH" ] && LOGO_WIDTH=${#_hw_l}
 done
+HW_TITLE="HyperWebster OS - Starman"
+HW_SUBTITLE="hyperarch"
 
 # Tokyo Night gum theme (matches Omarchy presentation.sh).
 hw_gum_theme() {
@@ -520,10 +532,8 @@ hw_draw_logo() {
       printf '%*s%s%s%s\n' "$pad_l" '' "$HW_GB" "$line" "$HW_R"
     done
     echo
-    # Title as plain centered text (no box-drawing — missing glyphs on some
-    # live consoles made this look like a stuck gum input with a cursor).
-    printf '%s%s%s%s\n' "$(hw_pad 28)" "$HW_GB" "HyperWebster OS · Starman" "$HW_R"
-    printf '%s%s%s%s\n' "$(hw_pad 18)" "$HW_DIM" "hyperarch" "$HW_R"
+    printf '%s%s%s%s\n' "$(hw_pad ${#HW_TITLE})" "$HW_GB" "$HW_TITLE" "$HW_R"
+    printf '%s%s%s%s\n' "$(hw_pad ${#HW_SUBTITLE})" "$HW_DIM" "$HW_SUBTITLE" "$HW_R"
     echo
   } >/dev/tty
 }
@@ -533,7 +543,7 @@ hw_step_begin() {
   clear >/dev/tty
   hw_gum_theme
   hw_draw_logo
-  tcecho "Step ${HW_STEP}/${HW_TOTAL} · $1" "$HW_CYAN" "$HW_R"
+  tcecho "Step ${HW_STEP}/${HW_TOTAL} - $1" "$HW_CYAN" "$HW_R"
   echo >/dev/tty
 }
 
@@ -544,7 +554,7 @@ hw_read() {
   local var="$1" prompt="$2" default="${3:-}"
   tcecho "$prompt" "$HW_CYAN" "$HW_R"
   if command -v gum &>/dev/null; then
-    local -a args=(input --placeholder "${default:-$prompt}")
+    local -a args=(input --placeholder "...")
     [ -n "$default" ] && args+=(--value "$default")
     local val
     val=$(gum "${args[@]}" </dev/tty) || val=""
@@ -564,7 +574,7 @@ hw_secret() {
   tcecho "$prompt" "$HW_CYAN" "$HW_R"
   if command -v gum &>/dev/null; then
     local val
-    val=$(gum input --password --placeholder "••••••••" </dev/tty) || val=""
+    val=$(gum input --password --placeholder "********" </dev/tty) || val=""
     printf -v "$var" '%s' "$val"
   else
     csecret "$var" "> "
@@ -572,17 +582,22 @@ hw_secret() {
 }
 
 # gum choose / bash arrow-key menu. Sets MENU_CHOICE (0-based) + MENU_VALUE.
+# Returns 1 if the user cancels (Esc) so callers can retry — never default to
+# option 0 on a failed/cancelled choose (dangerous on the disk menu).
 hw_choose() {
   local title="$1"; shift
   local -a opts=("$@")
   if command -v gum &>/dev/null; then
-    MENU_VALUE=$(gum choose --header "$title" "${opts[@]}" </dev/tty)
+    local val
+    if ! val=$(gum choose --header "$title" "${opts[@]}" </dev/tty); then
+      return 1
+    fi
+    MENU_VALUE=$val
     local i
     for i in "${!opts[@]}"; do
-      if [ "${opts[$i]}" = "$MENU_VALUE" ]; then MENU_CHOICE=$i; return; fi
+      if [ "${opts[$i]}" = "$MENU_VALUE" ]; then MENU_CHOICE=$i; return 0; fi
     done
-    MENU_CHOICE=0
-    return
+    return 1
   fi
   tui_menu "$title" "${opts[@]}"
 }
@@ -605,9 +620,18 @@ hw_confirm() {
 tui_menu() {
   local title="$1"; shift
   local -a opts=("$@")
-  local n=${#opts[@]} sel=0 first=1 i key rest o w
+  local n=${#opts[@]} sel=0 first=1 i key rest o w cols maxlab
+  cols=$(hw_cols)
+  maxlab=$(( cols - 8 ))
+  [ "$maxlab" -lt 20 ] && maxlab=20
+  # Truncate long labels (lsblk MODEL) so redraw row counts stay correct.
+  for i in "${!opts[@]}"; do
+    if [ "${#opts[$i]}" -gt "$maxlab" ]; then
+      opts[$i]="${opts[$i]:0:$((maxlab - 3))}..."
+    fi
+  done
   local lines=$(( n + 3 ))
-  local hint='↑/↓ move · Enter select'
+  local hint='up/down move - Enter select'
   local maxw=${#title}
   for o in "${opts[@]}"; do w=$(( ${#o} + 2 )); [ "$w" -gt "$maxw" ] && maxw=$w; done
   [ "${#hint}" -gt "$maxw" ] && maxw=${#hint}
@@ -619,7 +643,7 @@ tui_menu() {
       printf '\r\033[2K%s%s%s%s\n\r\033[2K\n' "$pad" "$HW_CYAN" "$title" "$HW_R"
       for i in "${!opts[@]}"; do
         if [ "$i" -eq "$sel" ]; then
-          printf '\r\033[2K%s%s%s ❯ %s%s\n' "$pad" "$HW_SEL_BG" "$HW_SEL_FG" "${opts[$i]}" "$HW_R"
+          printf '\r\033[2K%s%s%s > %s%s\n' "$pad" "$HW_SEL_BG" "$HW_SEL_FG" "${opts[$i]}" "$HW_R"
         else
           printf '\r\033[2K%s  %s%s%s\n' "$pad" "$HW_DIM" "${opts[$i]}" "$HW_R"
         fi
@@ -664,7 +688,7 @@ hw_log_start() {
         [ "${#line}" -gt "$maxw" ] && line="${line:0:$maxw}..."
         pad=$(hw_pad $((maxw + 4)))
         if [ -n "$line" ]; then
-          out+=$'\033[2K'"${pad}${HW_DIM} → ${line}${HW_R}"$'\n'
+          out+=$'\033[2K'"${pad}${HW_DIM} -> ${line}${HW_R}"$'\n'
         else
           out+=$'\033[2K'"${pad}"$'\n'
         fi
@@ -685,25 +709,25 @@ hw_install_screen() {
   clear >/dev/tty
   hw_draw_logo
   tcecho "Installing HyperWebster OS" "$HW_GB" "$HW_R"
-  tcecho "Logs stream below · full detail on tty2 (Ctrl+Alt+F2)" "$HW_DIM" "$HW_R"
+  tcecho "Logs stream below - full detail on tty2 (Ctrl+Alt+F2)" "$HW_DIM" "$HW_R"
   printf '\n' >/dev/tty
 }
 
 hw_fail() {
   trap - ERR
-  hw_log_stop
+  hw_ui_cleanup
   exec >/dev/tty 2>&1
   echo
-  cecho "Install FAILED at: $(cat "$HW_PHASE_FILE" 2>/dev/null)" "$HW_GB" "$HW_R"
-  cecho "See the log on tty2:  Ctrl+Alt+F2  →  cat /tmp/installer.log" "$HW_DIM" "$HW_R"
+  tcecho "Install FAILED at: $(cat "$HW_PHASE_FILE" 2>/dev/null)" "$HW_GB" "$HW_R"
+  tcecho "See the log on tty2:  Ctrl+Alt+F2  ->  cat /tmp/installer.log" "$HW_DIM" "$HW_R"
   echo
   tail -n 25 /tmp/installer.log 2>/dev/null
 }
 
 # Welcome screen (before step 1).
 hw_draw_logo
-cecho "HyperWebster OS · Arch · Hyprland · gaming desktop - offline" "$HW_DIM" "$HW_R"
-echo
+tcecho "HyperWebster OS - Arch - Hyprland - gaming desktop (offline)" "$HW_DIM" "$HW_R"
+echo >/dev/tty
 
 # ----------------------------------------------------- offline payload ------
 # Everything installs from the package repo bundled on the install media.
@@ -714,11 +738,12 @@ echo
 # Remount the install media by the UUID archiso itself booted from.
 HYPERWEBSTER_PAYLOAD=/run/archiso/bootmnt/hyperwebster
 if [ ! -f "$HYPERWEBSTER_PAYLOAD/repo/hyperwebster.db" ]; then
-  cecho "Boot media unmounted by copytoram - remounting the offline repo..." "$HW_DIM" "$HW_R"
+  tcecho "Boot media unmounted by copytoram - remounting the offline repo..." "$HW_DIM" "$HW_R"
   iso_uuid=$(sed -n 's/.*archisosearchuuid=\([^ ]*\).*/\1/p' /proc/cmdline)
   iso_label=$(sed -n 's/.*archisolabel=\([^ ]*\).*/\1/p' /proc/cmdline)
   iso_dev=""
-  for _ in $(seq 1 15); do
+  for _try in $(seq 1 15); do
+    tcecho "Looking for install media... ${_try}/15" "$HW_DIM" "$HW_R"
     if [ -n "$iso_uuid" ] && [ -e "/dev/disk/by-uuid/$iso_uuid" ]; then
       iso_dev="/dev/disk/by-uuid/$iso_uuid"; break
     fi
@@ -729,7 +754,9 @@ if [ ! -f "$HYPERWEBSTER_PAYLOAD/repo/hyperwebster.db" ]; then
   done
   if [ -n "$iso_dev" ]; then
     mkdir -p /run/archiso/bootmnt
-    mount -o ro "$iso_dev" /run/archiso/bootmnt || true
+    if ! mount -o ro "$iso_dev" /run/archiso/bootmnt; then
+      tcecho "mount $iso_dev failed" "$HW_GB" "$HW_R"
+    fi
   fi
 fi
 if [ ! -f "$HYPERWEBSTER_PAYLOAD/repo/hyperwebster.db" ] || [ ! -f "$HYPERWEBSTER_PAYLOAD/base-packages.list" ]; then
@@ -739,8 +766,8 @@ if [ ! -f "$HYPERWEBSTER_PAYLOAD/repo/hyperwebster.db" ] || [ ! -f "$HYPERWEBSTE
 fi
 # Strip comments/blank lines so the list file can be annotated.
 mapfile -t BASE_PKGS < <(grep -vE '^\s*(#|$)' "$HYPERWEBSTER_PAYLOAD/base-packages.list")
-cecho "Offline repo found (${#BASE_PKGS[@]} base packages)." "$HW_DIM" "$HW_R"
-echo
+tcecho "Offline repo found (${#BASE_PKGS[@]} base packages)." "$HW_DIM" "$HW_R"
+echo >/dev/tty
 
 # pacman config used for every install-time operation: ONLY the bundled repo.
 # The installed system gets the normal online mirrors instead (written later).
@@ -788,7 +815,7 @@ USER_PW="$PW1"
 echo
 
 hw_step_begin "Region"
-hw_choose "Where are you?  (sets time zone, language & keyboard)" \
+while ! hw_choose "Where are you?  (sets time zone, language & keyboard)" \
   "United Kingdom" \
   "Ireland" \
   "United States" \
@@ -799,7 +826,9 @@ hw_choose "Where are you?  (sets time zone, language & keyboard)" \
   "Spain" \
   "Italy" \
   "Netherlands" \
-  "Other (advanced - type & search)"
+  "Other (advanced - type & search)"; do
+  tcecho "Selection cancelled - choose again." "$HW_DIM" "$HW_R"
+done
 case "$MENU_VALUE" in
   "United Kingdom") TIMEZONE=Europe/London;    LOCALE=en_GB.UTF-8; KEYMAP=uk;        XKB_LAYOUT=gb ;;
   "Ireland")        TIMEZONE=Europe/Dublin;    LOCALE=en_IE.UTF-8; KEYMAP=uk;        XKB_LAYOUT=gb ;;
@@ -859,7 +888,7 @@ case "$MENU_VALUE" in
     esac
     ;;
 esac
-cecho "Region set: ${TIMEZONE} · ${LOCALE} · keymap ${KEYMAP}" "$HW_DIM" "$HW_R"
+cecho "Region set: ${TIMEZONE} / ${LOCALE} / keymap ${KEYMAP}" "$HW_DIM" "$HW_R"
 
 hw_step_begin "Disk"
 mapfile -t DISKS < <(lsblk -d -n -p -o NAME,SIZE,MODEL | grep -Ev '/dev/(loop|sr|zram|fd)')
@@ -872,7 +901,10 @@ while true; do
   for d in "${DISKS[@]}"; do
     DISK_LABELS+=("$(awk '{name=$1; size=$2; $1=""; $2=""; sub(/^[[:space:]]+/,""); printf "%-16s %-9s %s", name, size, $0}' <<<"$d")")
   done
-  hw_choose "Install to which disk?  (everything on it is erased)" "${DISK_LABELS[@]}"
+  if ! hw_choose "Install to which disk?  (everything on it is erased)" "${DISK_LABELS[@]}"; then
+    tcecho "Disk selection cancelled - choose again." "$HW_DIM" "$HW_R"
+    continue
+  fi
   DISK=$(awk '{print $1}' <<<"${DISKS[$MENU_CHOICE]}")
   if hw_confirm "Erase $DISK and install HyperWebster OS?  All data on this disk will be lost." n; then
     break
@@ -880,17 +912,21 @@ while true; do
 done
 
 hw_step_begin "Security"
-hw_choose "Encrypt the root disk with LUKS2?" \
+while ! hw_choose "Encrypt the root disk with LUKS2?" \
   "Yes - LUKS2 encryption (recommended)" \
-  "No - plain btrfs (no encryption)"
+  "No - plain btrfs (no encryption)"; do
+  tcecho "Selection cancelled - choose again." "$HW_DIM" "$HW_R"
+done
 USE_LUKS=$MENU_CHOICE
 
 LUKS_PW=""
 if [ "$USE_LUKS" -eq 0 ]; then
   echo
-  hw_choose "LUKS fallback passphrase (when TPM unlock fails)?" \
+  while ! hw_choose "LUKS fallback passphrase (when TPM unlock fails)?" \
     "Same as $USERNAME login password" \
-    "Different passphrase (enter twice)"
+    "Different passphrase (enter twice)"; do
+    tcecho "Selection cancelled - choose again." "$HW_DIM" "$HW_R"
+  done
   if [ "$MENU_CHOICE" -eq 0 ]; then
     LUKS_PW="$USER_PW"
     cecho "LUKS fallback will use your login password." "$HW_DIM" "$HW_R"
@@ -908,9 +944,11 @@ if [ "$USE_LUKS" -eq 0 ]; then
   LUKS_TPM=1
   if [ -e /dev/tpmrm0 ] || [ -e /dev/tpm0 ]; then
     echo
-    hw_choose "Enroll TPM2 for passphrase-free unlock at boot?" \
+    while ! hw_choose "Enroll TPM2 for passphrase-free unlock at boot?" \
       "Yes - TPM2 auto-unlock (passphrase stays as fallback)" \
-      "No - passphrase only"
+      "No - passphrase only"; do
+      tcecho "Selection cancelled - choose again." "$HW_DIM" "$HW_R"
+    done
     LUKS_TPM=$MENU_CHOICE
     [ "$LUKS_TPM" -eq 0 ] && cecho "TPM2 will be enrolled after install." "$HW_DIM" "$HW_R"
   else
@@ -935,6 +973,8 @@ hw_phase "Preparing the disk"
 exec >>/tmp/installer.log 2>&1
 trap hw_fail ERR
 hw_log_start
+# Destructive work begins — block getty relaunch of a second installer session.
+touch "$MARKER"
 echo "==> Wiping $DISK..."
 swapoff -a || true
 umount -R /mnt 2>/dev/null || true
@@ -2504,20 +2544,22 @@ rm -f /mnt/var/cache/pacman/pkg/*
 # Heavy phase done — stop the log panel, restore on-screen output, show completion.
 hw_log_stop
 trap - ERR
+trap - INT TERM
 exec >/dev/tty 2>&1
-clear
+clear >/dev/tty
 hw_draw_logo
 tcecho "HyperWebster OS install complete" "$HW_GB" "$HW_R"
 printf '\n' >/dev/tty
 tcecho "Remove the install media and reboot." "$HW_B" "$HW_R"
 printf '\n' >/dev/tty
-tcecho "First boot goes straight to the graphical login (SDDM, themed) —" "$HW_DIM" "$HW_R"
+tcecho "First boot goes straight to the graphical login (SDDM, themed) -" "$HW_DIM" "$HW_R"
 tcecho "log in and the themed Hyprland desktop starts. No internet needed;" "$HW_DIM" "$HW_R"
 tcecho "run 'sudo pacman -Syu' once when you're online to sync databases." "$HW_DIM" "$HW_R"
 printf '\n' >/dev/tty
 PROMPT="Press ENTER to reboot now (Ctrl+C for a shell)... "
 printf '%s' "$(hw_pad "${#PROMPT}")" >/dev/tty
 read -rp "$PROMPT" </dev/tty
+printf '\033[?25h' >/dev/tty
 # Flush ALL pending writes to disk before unmounting. With the btrfs subvolume
 # layout there are 5 mounts under /mnt; `umount -R` can fail partway (it's
 # tolerated below), which previously left the just-written bootloader files
