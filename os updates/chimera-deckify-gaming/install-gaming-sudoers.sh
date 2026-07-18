@@ -1,14 +1,12 @@
 #!/bin/sh
-# install-gaming-sudoers.sh — NOPASSWD for session arm + SDDM restart.
-# Idempotent; always refreshes the drop-in so older installs pick up
-# hyperwebster-restart-sddm.
+# install-gaming-sudoers.sh — NOPASSWD for session arm + desktop exit helpers.
 set -eu
 
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 cat > "$TMP" <<'SUDO'
 # HyperWebster — gamescope session switching without a password prompt.
-%wheel ALL=(ALL) NOPASSWD: /usr/local/bin/gaming-session-switch, /usr/local/bin/hyperwebster-restart-sddm
+%wheel ALL=(ALL) NOPASSWD: /usr/local/bin/gaming-session-switch, /usr/local/bin/hyperwebster-restart-sddm, /usr/local/bin/hyperwebster-set-desktop-session
 SUDO
 
 if ! visudo -cf "$TMP" >/dev/null 2>&1; then

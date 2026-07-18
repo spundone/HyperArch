@@ -1,5 +1,5 @@
 #!/bin/bash
-# gaming-session-switch — HyperWebster session helper (Chimera / Deckify / DeckShift).
+# gaming-session-switch — one-shot SDDM autologin arm for desktop↔gaming.
 set -u
 
 CONF="/etc/sddm.conf.d/zz-gaming-session.conf"
@@ -14,7 +14,23 @@ USER_NAME="${SUDO_USER:-}"
 if [[ -z "$USER_NAME" ]]; then
   USER_NAME=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3 != "sddm" && $3 != "" { print $3; exit }')
 fi
-[[ -n "$USER_NAME" ]] || { echo "Error: cannot determine the user to autologin" >&2; exit 1; }
+if [[ -z "$USER_NAME" ]]; then
+  echo "Error: cannot determine the user to autologin" >&2
+  exit 1
+fi
+
+resolve_desktop_session() {
+  local s
+  for s in hyprland-uwsm hyprland; do
+    if [[ -f "/usr/share/wayland-sessions/${s}.desktop" ]] \
+      || [[ -f "/usr/local/share/wayland-sessions/${s}.desktop" ]]; then
+      echo "$s"
+      return 0
+    fi
+  done
+  # Last resort — still write something explicit.
+  echo "hyprland-uwsm"
+}
 
 case "${1:-}" in
   gaming)
@@ -23,7 +39,7 @@ case "${1:-}" in
       exit 1
     }
     ;;
-  desktop) SESSION="hyprland-uwsm" ;;
+  desktop) SESSION=$(resolve_desktop_session) ;;
   *)
     echo "Usage: $0 {gaming|desktop}" >&2
     exit 1
@@ -36,5 +52,6 @@ User=${USER_NAME}
 Session=${SESSION}
 Relogin=false
 EOF
+sync
 touch "$MARKER"
 echo "Session set to: $1 mode ($SESSION, one-shot autologin armed)"

@@ -1,0 +1,52 @@
+#!/bin/bash
+# steamos-session-select — HyperWebster overlay of CachyOS's helper.
+# Steam → Switch to Desktop calls: steamos-session-select plasma
+# Redirect "plasma" to Hyprland (hyprland-uwsm) on this distro.
+set -e
+
+case "$1" in
+  persistent)
+    systemctl --user mask cachyos-gamescope-autologin.service
+    pkexec /usr/local/bin/hyperwebster-set-desktop-session
+    ;;
+  oneshot)
+    systemctl --user unmask cachyos-gamescope-autologin.service
+    pkexec /usr/lib/steamos/steam-set-session gamescope-session.desktop
+    ;;
+  gamescope)
+    pkexec /usr/lib/steamos/steam-set-session gamescope-session.desktop
+    systemctl --user stop graphical-session.target 2>/dev/null || true
+    ;;
+  plasma|desktop|hyprland)
+    # Same action as Steam "Switch to Desktop", Hyprland instead of Plasma.
+    if command -v sudo >/dev/null && sudo -n /usr/local/bin/hyperwebster-set-desktop-session 2>/dev/null; then
+      :
+    else
+      pkexec /usr/local/bin/hyperwebster-set-desktop-session
+    fi
+    steam -shutdown
+    systemctl --user stop gamescope-session.target
+    ;;
+  *)
+    [[ -n "$1" ]] && echo -e "Unknown session '$1'\n"
+    cat <<EOF
+Usage: $(basename "$0") <mode>
+
+  plasma | desktop | hyprland
+      Switch to Hyprland desktop (Steam "Switch to Desktop").
+
+  gamescope
+      Switch to the Gamescope session.
+
+  persistent / oneshot
+      CachyOS autologin behaviour toggles.
+EOF
+    exit 1
+    ;;
+esac
+
+if [[ -e /dev/input/.hidden ]]; then
+  echo "Unhide hidden controller devices as needed"
+  pkexec mv /dev/input/.hidden/* /dev/input
+  pkexec rm -r /dev/input/.hidden
+fi

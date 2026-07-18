@@ -1,0 +1,26 @@
+#!/bin/bash
+# hyperwebster-set-desktop-session — root helper: next SDDM session = Hyprland.
+# Mirrors /usr/lib/steamos/steam-set-session but targets hyprland-uwsm (not Plasma)
+# and clears the DeckShift one-shot conf so the two drop-ins do not fight.
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+  echo "must run as root" >&2
+  exit 1
+fi
+
+SESSION=hyprland-uwsm.desktop
+if [[ ! -f /usr/share/wayland-sessions/hyprland-uwsm.desktop ]]; then
+  SESSION=hyprland.desktop
+fi
+
+install -d /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/zz-steamos-autologin.conf <<EOF
+[Autologin]
+Session=$SESSION
+EOF
+
+# Competing one-shot conf from DeckShift switch path — remove so Steam/CachyOS
+# path wins cleanly.
+rm -f /etc/sddm.conf.d/zz-gaming-session.conf /run/deckshift-session-switch
+echo "desktop session armed: $SESSION"

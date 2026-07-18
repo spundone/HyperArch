@@ -1,15 +1,5 @@
 #!/bin/bash
-# gaming-session-switch — DeckShift-compatible session-switch helper, patched
-# for password-at-boot. Same path + same {gaming|desktop} interface as
-# DeckShift's original (the existing sudoers rule and switch-to-gaming /
-# switch-to-desktop / os-session-select callers all keep working).
-#
-# DeckShift's original keeps a PERMANENT SDDM autologin drop-in and only flips
-# its Session= line, so the machine never shows a password screen. This version
-# writes the drop-in fresh on every switch and arms a one-shot marker in /run;
-# sddm-autologin-gate (ExecStartPre on sddm.service) consumes the marker so the
-# autologin applies to THAT restart only. Cold boots, crashes, and manual SDDM
-# restarts find no marker and get the normal password greeter.
+# gaming-session-switch — one-shot SDDM autologin arm for desktop↔gaming.
 set -u
 
 CONF="/etc/sddm.conf.d/zz-gaming-session.conf"
@@ -20,7 +10,6 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-# The desktop user comes from sudo (all DeckShift callers invoke via sudo -n).
 USER_NAME="${SUDO_USER:-}"
 if [[ -z "$USER_NAME" ]]; then
   USER_NAME=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3 != "sddm" && $3 != "" { print $3; exit }')
@@ -30,6 +19,19 @@ if [[ -z "$USER_NAME" ]]; then
   exit 1
 fi
 
+resolve_desktop_session() {
+  local s
+  for s in hyprland-uwsm hyprland; do
+    if [[ -f "/usr/share/wayland-sessions/${s}.desktop" ]] \
+      || [[ -f "/usr/local/share/wayland-sessions/${s}.desktop" ]]; then
+      echo "$s"
+      return 0
+    fi
+  done
+  # Last resort — still write something explicit.
+  echo "hyprland-uwsm"
+}
+
 case "${1:-}" in
   gaming)
     SESSION=$(/usr/local/bin/hyperwebster-gaming-session 2>/dev/null) || {
@@ -37,7 +39,7 @@ case "${1:-}" in
       exit 1
     }
     ;;
-  desktop) SESSION="hyprland-uwsm" ;;
+  desktop) SESSION=$(resolve_desktop_session) ;;
   *)
     echo "Usage: $0 {gaming|desktop}" >&2
     exit 1
@@ -50,5 +52,6 @@ User=${USER_NAME}
 Session=${SESSION}
 Relogin=false
 EOF
+sync
 touch "$MARKER"
-echo "Session set to: $1 mode (one-shot autologin armed)"
+echo "Session set to: $1 mode ($SESSION, one-shot autologin armed)"

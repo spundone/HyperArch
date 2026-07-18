@@ -98,8 +98,15 @@ if [ -x "$LAYER/chimera-deckify-gaming/install-gaming-sudoers.sh" ]; then
   sudo sh "$LAYER/chimera-deckify-gaming/install-gaming-sudoers.sh" || true
 fi
 
+# Super+Shift+R inside gamescope (xbindkeys + /etc/xbindkeysrc).
+if [ -x "$LAYER/chimera-deckify-gaming/install-gamescope-exit-bind.sh" ]; then
+  sudo bash "$LAYER/chimera-deckify-gaming/install-gamescope-exit-bind.sh" || true
+fi
+
 echo
 echo "Deckify / Chimera gaming stack installed."
 echo "  Super+Shift+S  — switch to gamescope Steam session"
+echo "  Super+Shift+R  — exit gamescope back to desktop (Ctrl+Shift+F9 also works)"
+echo "  (Steam → Power → Exit to Desktop works too)"
 echo "  Limine Starman entry — boots straight into gaming when TPM/LUKS allow"
 echo "  Reboot and pick Starman (Gaming / Steam) for controller-friendly boot"

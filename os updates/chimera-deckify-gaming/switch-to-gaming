@@ -32,6 +32,10 @@ if ! sudo -n /usr/local/bin/gaming-session-switch gaming; then
   exit 1
 fi
 
+# Marker for switch-to-desktop / DeckShift-era helpers (optional with gamescope
+# process check, but keeps Super+Shift+R paths consistent).
+touch /tmp/.gaming-session-active 2>/dev/null || true
+
 # Detached: this session dies when SDDM restarts.
 nohup sudo -n /usr/local/bin/hyperwebster-restart-sddm >/dev/null 2>&1 &
 disown 2>/dev/null || true

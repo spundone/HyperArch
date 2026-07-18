@@ -1,7 +1,7 @@
 #!/bin/bash
 # hyperwebster-restart-sddm — passwordless SDDM restart for session switches.
-# Queues via systemd-run so the restart survives tearing down the current
-# graphical session (Super+Shift+S / Exit to Desktop).
+# Kills leftover gamescope (often holds seat0/TTY1), restarts SDDM, then chvt
+# to the new graphical session VT.
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
@@ -9,14 +9,46 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-# Allow a cheap sudoers / presence check without bouncing the display manager.
 if [[ "${1:-}" == "--check" ]]; then
   exit 0
 fi
 
 systemctl reset-failed hyperwebster-sddm-restart.service 2>/dev/null || true
-# --collect: remove the transient unit when done. Unit name is fixed so a
-# second switch while the first is pending replaces cleanly after reset-failed.
 exec systemd-run --collect --unit=hyperwebster-sddm-restart \
   --description="HyperWebster gamescope/desktop SDDM restart" \
-  /bin/systemctl restart sddm.service
+  /bin/bash -c '
+    set +e
+    # gamescope often keeps seat0 on TTY1; SDDM cannot take over until it dies.
+    pkill -9 -x gamescope 2>/dev/null
+    pkill -9 -x gamescope-wl 2>/dev/null
+    sleep 0.5
+    systemctl restart sddm.service
+    vt=""
+    for _ in $(seq 1 20); do
+      sleep 0.5
+      systemctl is-active --quiet sddm.service || systemctl start sddm.service
+      while read -r sid _rest; do
+        [ -z "$sid" ] && continue
+        user=$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)
+        [ "$user" = "sddm" ] && continue
+        [ -z "$user" ] && continue
+        typ=$(loginctl show-session "$sid" -p Type --value 2>/dev/null || true)
+        nr=$(loginctl show-session "$sid" -p VTNr --value 2>/dev/null || true)
+        seat=$(loginctl show-session "$sid" -p Seat --value 2>/dev/null || true)
+        [ "$seat" != "seat0" ] && continue
+        [ -z "$nr" ] || [ "$nr" = "0" ] && continue
+        # Prefer wayland/x11 user sessions (Hyprland), else any seat0 VT.
+        if [ "$typ" = "wayland" ] || [ "$typ" = "x11" ] || [ -z "$vt" ]; then
+          vt=$nr
+          [ "$typ" = "wayland" ] || [ "$typ" = "x11" ] && break
+        fi
+      done < <(loginctl list-sessions --no-legend 2>/dev/null | awk "{print \$1}")
+      if [ -n "$vt" ]; then
+        chvt "$vt"
+        exit 0
+      fi
+    done
+    # Last resort: try common SDDM / session VTs.
+    chvt 1 2>/dev/null || true
+    chvt 2 2>/dev/null || true
+  '

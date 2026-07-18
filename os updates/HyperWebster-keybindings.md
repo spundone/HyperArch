@@ -255,7 +255,7 @@ Print / Shift+Print / Super+Shift+Alt+S.)
 | Keys | Action |
 |------|--------|
 | `Super+Shift+S` | Switch to Gaming Mode (full gamescope/Steam session via SDDM) **if DeckShift or Deckify/Chimera is installed**; does nothing otherwise |
-| `Super+Shift+R` | Exit Gaming Mode back to the desktop - works **inside the gaming session only** (or Steam > Power > Exit to Desktop) |
+| `Super+Shift+R` | Exit Gaming Mode back to the desktop (evdev; also `Ctrl+Shift+F9`, or Steam > Power > Exit to Desktop) |
 
 Cold boots always show the SDDM password greeter; only the desktop↔gaming
 switch itself skips the password (one-shot autologin).

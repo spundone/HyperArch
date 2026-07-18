@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""hyperwebster-gamescope-hotkeyd — Ctrl+Shift+F9 → exit gaming (evdev).
+
+Runs as a user service alongside gamescope-session. Reads /dev/input directly
+so Steam GamepadUI cannot steal the combo (unlike xbindkeys / X11 grabs).
+Requires membership in the `input` group (install script adds it).
+"""
+from __future__ import annotations
+
+import os
+import select
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# timespec + type + code + value  (64-bit)
+EVENT_FMT = "llHHi"
+EVENT_SIZE = struct.calcsize(EVENT_FMT)
+EV_KEY = 0x01
+KEY_LEFTCTRL, KEY_RIGHTCTRL = 29, 97
+KEY_LEFTSHIFT, KEY_RIGHTSHIFT = 42, 54
+KEY_LEFTMETA, KEY_RIGHTMETA = 125, 126
+KEY_R = 19
+KEY_F9 = 67
+
+EXIT_BIN = "/usr/local/bin/hyperwebster-exit-gaming"
+LOG = Path("/tmp/hyperwebster-gamescope-hotkeyd.log")
+
+pressed: set[int] = set()
+last_fire = 0.0
+
+
+def log(msg: str) -> None:
+    try:
+        with LOG.open("a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+    except OSError:
+        pass
+
+
+def in_gamescope() -> bool:
+    if Path("/tmp/.gaming-session-active").exists():
+        return True
+    try:
+        subprocess.run(
+            ["pgrep", "-x", "gamescope"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        pass
+    try:
+        subprocess.run(
+            ["pgrep", "-x", "gamescope-wl"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def fire() -> None:
+    global last_fire
+    now = time.monotonic()
+    if now - last_fire < 2.0:
+        return
+    last_fire = now
+    if not in_gamescope():
+        log("combo seen but not in gamescope — ignore")
+        return
+    log("combo → hyperwebster-exit-gaming")
+    try:
+        subprocess.Popen(
+            [EXIT_BIN],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as e:
+        log(f"exec failed: {e}")
+
+
+def open_keyboards() -> list[tuple[int, Path]]:
+    fds: list[tuple[int, Path]] = []
+    for path in sorted(Path("/dev/input").glob("event*")):
+        name = Path(f"/sys/class/input/{path.name}/device/name")
+        try:
+            label = name.read_text().strip().lower() if name.exists() else ""
+        except OSError:
+            label = ""
+        # Skip pure mice / power buttons when obvious; keep keyboards + "keyboard" in name.
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        # Prefer devices that look like keyboards; still open others (some pads inject keys).
+        if "mouse" in label and "keyboard" not in label:
+            os.close(fd)
+            continue
+        fds.append((fd, path))
+    return fds
+
+
+def main() -> int:
+    log("hotkeyd start")
+    fds = open_keyboards()
+    if not fds:
+        log("no readable /dev/input/event* — add user to `input` group and re-login")
+        return 1
+    log(f"watching {len(fds)} input nodes")
+    fd_map = {fd: path for fd, path in fds}
+    while True:
+        try:
+            readable, _, _ = select.select(list(fd_map), [], [], 5.0)
+        except (InterruptedError, select.error):
+            continue
+        for fd in readable:
+            try:
+                data = os.read(fd, EVENT_SIZE * 32)
+            except BlockingIOError:
+                continue
+            except OSError:
+                continue
+            for i in range(0, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
+                _sec, _usec, etype, code, value = struct.unpack_from(
+                    EVENT_FMT, data, i
+                )
+                if etype != EV_KEY:
+                    continue
+                if value == 1:
+                    pressed.add(code)
+                elif value == 0:
+                    pressed.discard(code)
+                else:
+                    continue  # autorepeat
+                ctrl = KEY_LEFTCTRL in pressed or KEY_RIGHTCTRL in pressed
+                shift = KEY_LEFTSHIFT in pressed or KEY_RIGHTSHIFT in pressed
+                meta = KEY_LEFTMETA in pressed or KEY_RIGHTMETA in pressed
+                # Prefer Super+Shift+R (original HyperWebster bind). Ctrl+Shift+F9 kept as fallback.
+                if shift and value == 1:
+                    if meta and KEY_R in pressed:
+                        fire()
+                    elif ctrl and KEY_F9 in pressed:
+                        fire()
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        raise SystemExit(0)

@@ -1,20 +1,23 @@
 #!/bin/bash
-# switch-to-desktop — deckshift-login overlay of DeckShift's original.
+# switch-to-desktop — leave gamescope / Steam Big Picture for Hyprland.
 #
-# WHY THIS OVERLAY EXISTS: the original pkilled gamescope and slept BEFORE its
+# WHY THIS OVERLAY EXISTS: DeckShift's original pkilled gamescope BEFORE its
 # final `systemctl restart sddm`. Killing gamescope ends the login session, and
-# logind then kills the session's processes — including this very script (it
-# is launched by the in-session keybind monitor) — so the restart never ran.
-# Stock DeckShift got away with that because its PERMANENT Relogin=true
-# autologin re-logged the user in anyway; with deckshift-login's one-shot
-# autologin it left the SDDM greeter instead.
+# logind then kills this script — so the restart never ran. Stock DeckShift got
+# away with that via permanent Relogin=true; with one-shot autologin it left the
+# greeter. Fix: arm desktop switch, shut Steam down, queue SDDM restart detached.
 #
-# Fix, copied from the os-session-select path that already works: do the
-# cleanup, arm the one-shot switch, shut Steam down, then queue the SDDM
-# restart as a detached root job (nohup + disown). The restart job runs inside
-# PID 1, so it completes even though stopping SDDM kills this script and the
-# rest of the gaming session — no manual pkill of gamescope needed.
-if [[ ! -f /tmp/.gaming-session-active ]]; then
+# CachyOS gamescope-session never creates /tmp/.gaming-session-active (DeckShift
+# did). Accept either that marker OR a live gamescope process so Super+Shift+R
+# (xbindkeys) and manual calls work.
+in_gamescope() {
+  [[ -f /tmp/.gaming-session-active ]] && return 0
+  # Newer gamescope builds report comm as gamescope-wl.
+  pgrep -x gamescope >/dev/null 2>&1 && return 0
+  pgrep -x gamescope-wl >/dev/null 2>&1 && return 0
+  return 1
+}
+if ! in_gamescope; then
   exit 0
 fi
 rm -f /tmp/.gaming-session-active

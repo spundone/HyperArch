@@ -1,0 +1,52 @@
+#!/bin/bash
+# hyperwebster-exit-gaming — same path as Steam → Switch to Desktop (CachyOS),
+# but session = Hyprland instead of Plasma.
+#
+# Steam calls: steamos-session-select plasma
+#   → steam-set-session plasma.desktop
+#   → steam -shutdown
+#   → systemctl --user stop gamescope-session.target
+#
+# Restarting SDDM while gamescope holds seat0/TTY1 fails; stopping the
+# gamescope-session.target is what actually returns to the desktop.
+set -u
+LOG=/tmp/hyperwebster-gamescope-exit.log
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+log() { echo "$(ts) $*" >>"$LOG" 2>/dev/null || true; }
+
+if [[ ${EUID:-0} -eq 0 && -z "${HYPERWEBSTER_EXIT_USER:-}" ]]; then
+  USER_NAME=$(loginctl list-sessions --no-legend 2>/dev/null \
+    | awk '$3 != "" && $3 != "sddm" { print $3; exit }')
+  [[ -z "${USER_NAME:-}" ]] && USER_NAME=$(getent passwd 1000 2>/dev/null | cut -d: -f1 || true)
+  if [[ -n "${USER_NAME:-}" ]]; then
+    log "re-exec as $USER_NAME"
+    exec runuser -u "$USER_NAME" --env HYPERWEBSTER_EXIT_USER=1 -- "$0" "$@"
+  fi
+  exit 1
+fi
+
+in_gamescope() {
+  pgrep -x gamescope >/dev/null 2>&1 && return 0
+  pgrep -x gamescope-wl >/dev/null 2>&1 && return 0
+  [[ -f /tmp/.gaming-session-active ]] && return 0
+  return 1
+}
+
+log "exit-gaming (cachyos/steam path) uid=$(id -u)"
+if ! in_gamescope; then
+  log "skip: not in gamescope"
+  exit 0
+fi
+
+log "arm hyprland via zz-steamos-autologin.conf"
+if ! sudo -n /usr/local/bin/hyperwebster-set-desktop-session >>"$LOG" 2>&1; then
+  log "ERROR: hyperwebster-set-desktop-session failed (sudoers?)"
+  exit 1
+fi
+
+rm -f /tmp/.gaming-session-active
+log "steam -shutdown + stop gamescope-session.target"
+timeout 5 steam -shutdown >>"$LOG" 2>&1 || true
+systemctl --user stop gamescope-session.target >>"$LOG" 2>&1 || true
+log "done"
+exit 0
