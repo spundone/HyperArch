@@ -17,9 +17,9 @@
 
 - HyperWebster-OS lives at `~/Projects/HyperWebster-OS`; public repo is `spundone/HyperWebster-OS` on GitHub.
 - Personal Arch desktop ISO flavor forked from NoSignal-OS (`~/NoSignal-OS`); hyperarch / HyperWebster / Starman branding lineage.
-- Live installer uses a HyperWebster OS-branded, Omarchy-inspired `gum` TUI with Starman art and stepwise install flow.
-- ISO builds use `./build.sh` for Arch native or containerized OrbStack/Docker Desktop/WSL2; `hyperwebster.sh` auto-downloads the latest Arch ISO and uses mirror failover.
-- Shell still builds from upstream `28allday/nosignal-shell` until a `hyperwebster-shell` fork exists.
+- Live installer uses a HyperWebster OS-branded, Omarchy-inspired `gum` TUI with Starman art and stepwise install flow; do not pipe multiline Starman ASCII through `gum style` (it strips trailing spaces), and keep user-visible clear/status on `/dev/tty`.
+- ISO builds use `./build.sh` for Arch native or containerized OrbStack/Docker Desktop/WSL2; on Apple Silicon OrbStack force `linux/amd64`, disable pacman alpm sandbox, and keep the AUR chroot and unsquash work tree on Docker volumes (not macOS bind mounts — virtiofs rejects `.arch-chroot` and APFS is case-insensitive); `hyperwebster.sh` auto-downloads the latest Arch ISO and uses mirror failover.
+- Shell still builds from upstream `28allday/nosignal-shell` (branded and packed as a tarball for makechrootpkg; directories are not copied into the chroot) until a `hyperwebster-shell` fork exists.
 - Layer components live under `os updates/`; `hyperwebster-update` pulls the layer from GitHub, skips rsync when trees already match, and supports `--force-migrations`; migrations must tolerate already-identical files.
 - Gaming/TV focus: Limine Starman boot, Deckify/gamescope/Chimera, LUKS2 with TPM auto-unlock and Omarchy-style Plymouth fallback; public docs describe generic 4K HDR VRR TV gaming without personal hardware.
 - CachyOS optimized kernel and kernel manager ship out-of-the-box by default.
