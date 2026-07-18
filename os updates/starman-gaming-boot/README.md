@@ -2,7 +2,8 @@
 
 Adds a **Starman (Gaming / Steam)** entry to the Limine boot menu (baked in
 `hyperwebster.sh`). Selecting it appends `hyperwebster.starman=1` to the kernel
-command line.
+command line. The menu is intentionally two primary entries (desktop UKI +
+Starman); Snapshots appear when present. See `limine-menu-simplify/`.
 
 `hyperwebster-starman-boot.service` runs before SDDM and arms the same one-shot
 autologin marker used by DeckShift's `gaming-session-switch` - so cold boots

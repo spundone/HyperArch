@@ -1370,28 +1370,25 @@ cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/BOOT/BOOTX64.EFI
 # timeout: 10 — keep the Limine menu up 10s before auto-booting (user choice;
 # the limine snapshot tooling only manages entries, it never rewrites this).
 #
-# F4 (dead-boot after a kernel update): with ENABLE_UKI=yes the first kernel
-# update DELETES /boot/vmlinuz-linux + initramfs-linux.img (they're folded into
-# the UKI). The OLD seed made the *first/default* manual entry `protocol: linux`
-# pointing at those now-missing files, with no `default_entry:` — so once the
-# UKI hook ran, the default auto-boot target dead-booted to a TTY. The previous
-# post-install conversion mis-fired (ran once, no-op'd, marked applied), so the
-# durable fix lives HERE in the seed:
-#   * entry 1 = `protocol: efi` -> the UKI (boots once the UKI exists, which is
-#     at install in the normal path, or at worst after the first kernel update).
-#   * entry 2 = a `protocol: linux` fallback for the rare pre-UKI first boot
-#     (snapshot/limine-update failed at install, so no UKI yet). Becomes a no-op
-#     stub once the UKI exists; harmless, never the default.
-#   * `default_entry: 1` pins the UKI entry as default regardless of the auto
-#     entries limine appends below it on every kernel update (limine preserves
-#     these manual entries + general directives verbatim across regenerations,
-#     so this seed is durable — no per-update hook needed).
+# Menu is intentionally two entries (desktop UKI + Starman). ENABLE_UKI=yes
+# folds kernels into the UKI; manual protocol:linux fallbacks were removed
+# because they duplicated limine-entry-tool auto entries and cluttered the
+# menu. Recovery is Snapshots (when present) or the live USB.
+#   * entry 1 = `protocol: efi` -> UKI desktop (default)
+#   * entry 2 = Starman (same UKI + hyperwebster.starman=1)
+#   * `comment: machine-id=...` on entry 1 so limine-entry-tool updates that
+#     block instead of creating a nested duplicate OS folder
+#   * `default_entry: 1` pins the desktop UKI as default
+MACHINE_ID=$(tr -d '[:space:]' </mnt/etc/machine-id 2>/dev/null || true)
+[ -n "$MACHINE_ID" ] || MACHINE_ID=$(arch-chroot /mnt cat /etc/machine-id 2>/dev/null | tr -d '[:space:]' || true)
+[ -n "$MACHINE_ID" ] || MACHINE_ID="unknown"
 cat > /mnt/boot/limine.conf <<LIMINE
 timeout: 10
 default_entry: 1
 interface_branding: HyperWebster · hyperarch
 
 /HyperWebster · hyperarch (Arch Linux)
+    comment: machine-id=$MACHINE_ID
     protocol: efi
     path: boot():/EFI/Linux/hyperwebster_linux.efi
     cmdline: $KERNEL_OPTS
@@ -1400,22 +1397,6 @@ interface_branding: HyperWebster · hyperarch
     protocol: efi
     path: boot():/EFI/Linux/hyperwebster_linux.efi
     cmdline: $KERNEL_OPTS hyperwebster.starman=1
-
-/HyperWebster (fallback kernel)
-    protocol: linux
-    path: boot():/vmlinuz-linux-cachyos
-    cmdline: $KERNEL_OPTS
-    module_path: boot():/intel-ucode.img
-    module_path: boot():/amd-ucode.img
-    module_path: boot():/initramfs-linux-cachyos.img
-
-/HyperWebster (stock kernel fallback)
-    protocol: linux
-    path: boot():/vmlinuz-linux
-    cmdline: $KERNEL_OPTS
-    module_path: boot():/intel-ucode.img
-    module_path: boot():/amd-ucode.img
-    module_path: boot():/initramfs-linux.img
 LIMINE
 
 # Best-effort NVRAM boot entry (ignored if firmware NVRAM isn't writable here).
@@ -1433,15 +1414,17 @@ echo "==> Configuring Btrfs + Limine snapshots..."
 
 # /etc/default/limine is read by the limine tools to build UKIs + boot entries.
 # It must exist BEFORE the tools are installed/run. Carries the same cmdline.
+# ENABLE_LIMINE_FALLBACK / FIND_BOOTLOADERS off: keep \EFI\BOOT\BOOTX64.EFI on
+# disk for firmware, but do not list EFI fallback / scanned loaders in the menu.
 cat > /mnt/etc/default/limine <<LIMINE_DEFAULT
 TARGET_OS_NAME="HyperWebster"
 ESP_PATH="/boot"
 KERNEL_CMDLINE[default]+="$KERNEL_OPTS"
 ENABLE_UKI=yes
 CUSTOM_UKI_NAME="hyperwebster"
-ENABLE_LIMINE_FALLBACK=yes
-FIND_BOOTLOADERS=yes
-BOOT_ORDER="*, *fallback, Snapshots"
+ENABLE_LIMINE_FALLBACK=no
+FIND_BOOTLOADERS=no
+BOOT_ORDER="*, Snapshots"
 MAX_SNAPSHOT_ENTRIES=5
 SNAPSHOT_FORMAT_CHOICE=5
 LIMINE_DEFAULT
@@ -2107,14 +2090,12 @@ for m in "$LAYER/hyperwebster-update/migrations/"*.sh; do
 done > "$M_HOME/.local/state/hyperwebster/applied"
 
 # --- change 29 (limine-uki-dead-entry, finding F4, BLOCKER): FIXED IN THE SEED.
-# The dead-boot is now prevented at the source — the seeded limine.conf above
-# ships a `protocol: efi` -> UKI entry as entry 1 with `default_entry: 1`, plus a
-# `protocol: linux` fallback as entry 2. Limine preserves these manual entries +
-# `default_entry` verbatim across every kernel-update regeneration, so the
-# default boot target can never become the dead vmlinuz entry. No post-install
-# conversion is needed (the old one-shot conversion mis-fired on 20260613). The
-# limine-uki-dead-entry/ component is kept in the layer ONLY as a manual repair
-# tool for boxes installed from a pre-fix ISO; it is NOT run at install anymore.
+# The dead-boot is prevented at the source — seeded limine.conf ships a
+# `protocol: efi` -> UKI entry as entry 1 with `default_entry: 1` (plus Starman
+# as entry 2). Limine preserves these manual entries + `default_entry` across
+# regenerations, so the default never becomes a dead vmlinuz path. The
+# limine-uki-dead-entry/ component remains a manual repair for pre-fix ISOs;
+# limine-menu-simplify/ trims fallback clutter on older installs via migration.
 
 # --- change 2: default shell bash, matching Omarchy. The fish PACKAGE stays
 # (caelestia-meta hard-depends on it) and the hypr config keeps calling the
