@@ -56,6 +56,8 @@ them. Please support the originals; each remains under its own licence.
 
 ## Hardware detection & tuning
 
+- **[keyd](https://github.com/rvaiya/keyd)** - system-wide keyboard/mouse remapping
+  daemon; HyperWebster ships a gum TUI (`hyperwebster-input-remap`, Super+Ctrl+I).
 - **[CachyOS](https://github.com/CachyOS/CachyOS)** - `linux-cachyos` kernel (default),
   `cachyos-kernel-manager`, pacman repositories, and repo bootstrap tooling.
 - **[CachyOS `chwd`](https://github.com/CachyOS/chwd)** - GPU detection

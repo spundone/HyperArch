@@ -17,6 +17,7 @@ menu="System monitor (btop)
 System monitor (shell panel)
 Btrfs snapshots
 Monitor profiles (hyprmoncfg)
+Input remap (keyboard / mouse)
 CachyOS kernel manager
 System update (hyperwebster-update)
 Zephyr motion polish (toggle)
@@ -38,6 +39,9 @@ case "$choice" in
     ;;
   "Monitor profiles (hyprmoncfg)")
     exec "${TERMINAL:-kitty}" -e hyprmoncfg
+    ;;
+  "Input remap (keyboard / mouse)")
+    exec "${TERMINAL:-kitty}" --class TUI.float -e hyperwebster-input-remap
     ;;
   "CachyOS kernel manager")
     if command -v cachyos-kernel-manager >/dev/null 2>&1; then
