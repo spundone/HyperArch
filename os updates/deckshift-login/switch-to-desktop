@@ -59,7 +59,6 @@ touch /tmp/.deckshift-just-returned 2>/dev/null || true
 timeout 5 steam -shutdown 2>/dev/null || true
 sleep 1
 sudo -n chvt 2 2>/dev/null || true
-# Passwordless restart via pinned helper (not raw systemctl — sudoers).
-nohup sudo -n /usr/local/bin/hyperwebster-restart-sddm &>/dev/null &
+nohup sudo -n systemctl restart sddm &>/dev/null &
 disown
 exit 0

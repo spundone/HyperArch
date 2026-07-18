@@ -91,7 +91,6 @@ done
 [ -d "$SRC/appearance-toggles" ] && hw_cp "$SRC/appearance-toggles" "$DEST/"
 [ -d "$SRC/appearance-page" ] && hw_cp "$SRC/appearance-page" "$DEST/"
 [ -d "$SRC/colours-page" ] && hw_cp "$SRC/colours-page" "$DEST/"
-[ -d "$SRC/glyphs-fix" ] && hw_cp "$SRC/glyphs-fix" "$DEST/"
 [ -d "$SRC/cachyos-repo-switch" ] && hw_cp "$SRC/cachyos-repo-switch" "$DEST/"
 [ -d "$SRC/theme-polish" ] && hw_cp "$SRC/theme-polish" "$DEST/"
 [ -d "$SRC/drive-automount" ] && hw_cp "$SRC/drive-automount" "$DEST/"
@@ -105,9 +104,6 @@ done
 [ -d "$SRC/input-remap" ] && hw_cp "$SRC/input-remap" "$DEST/"
 [ -d "$SRC/omarchy-themes" ] && hw_cp "$SRC/omarchy-themes" "$DEST/"
 [ -d "$SRC/lockscreen-polish" ] && hw_cp "$SRC/lockscreen-polish" "$DEST/"
-[ -d "$SRC/system-tools" ] && hw_cp "$SRC/system-tools" "$DEST/"
-[ -d "$SRC/locale-utf8" ] && hw_cp "$SRC/locale-utf8" "$DEST/"
-[ -d "$SRC/caelestia-repair" ] && hw_cp "$SRC/caelestia-repair" "$DEST/"
 [ -d "$SRC/shell-branding" ] && hw_cp "$SRC/shell-branding" "$DEST/"
 [ -d "$SRC/update-alias" ] && hw_cp "$SRC/update-alias" "$DEST/"
 

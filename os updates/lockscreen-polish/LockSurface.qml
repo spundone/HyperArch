@@ -10,10 +10,8 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Bluetooth
 import Quickshell.Services.UPower
-import Quickshell.Io
 import Caelestia.Config
 import qs.components
-import qs.components.effects
 import qs.services
 import qs.utils
 
@@ -26,10 +24,6 @@ WlSessionLockSurface {
     readonly property bool errored: root.pam.state === "error" || root.pam.state === "fail"
     readonly property string wallSource: Wallpapers.current || Quickshell.shellPath("assets/wallpaper.webp")
     readonly property string logoSource: Quickshell.shellPath("assets/hyperwebster-logo.png")
-    readonly property string facePath: `${Paths.home}/.face`
-    // Prefer ~/.face (Settings / dashboard picker); fall back to Starman mark.
-    property bool faceReady: false
-    readonly property string avatarSource: faceReady ? `file://${root.facePath}` : root.logoSource
 
     contentItem.Config.screen: screen?.name ?? ""
     contentItem.Tokens.screen: screen?.name ?? ""
@@ -272,20 +266,12 @@ WlSessionLockSurface {
             font.pixelSize: 15
         }
 
-        // Profile photo / Starman — always circular-clipped (never a square in a ring)
+        // Starman / face
         Item {
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 56
             implicitWidth: 86
             implicitHeight: 86
-
-            FileView {
-                path: root.facePath
-                watchChanges: true
-                onFileChanged: reload()
-                onLoaded: root.faceReady = true
-                onLoadFailed: root.faceReady = false
-            }
 
             Rectangle {
                 anchors.centerIn: parent
@@ -306,40 +292,15 @@ WlSessionLockSurface {
                 }
             }
 
-            // Invisible circle used as the opacity mask for the avatar.
-            Rectangle {
-                id: avatarMask
-
+            Image {
+                id: logo
                 anchors.centerIn: parent
                 width: 72
                 height: 72
-                radius: 36
-                visible: false
-                layer.enabled: true
-            }
-
-            Item {
-                id: avatarClip
-
-                anchors.centerIn: parent
-                width: 72
-                height: 72
-                layer.enabled: true
-                layer.effect: Mask {
-                    maskSource: avatarMask
-                }
-
-                Image {
-                    id: logo
-
-                    anchors.fill: parent
-                    source: root.avatarSource
-                    // Crop fills the circle; Fit left letterboxed squares inside the ring.
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: false
-                    visible: status === Image.Ready
-                }
+                source: root.logoSource
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                visible: status === Image.Ready
             }
 
             Rectangle {

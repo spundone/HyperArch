@@ -19,16 +19,6 @@
       "disable": "hyperwebster-blur-toggle disable"
     },
     {
-      "id": "caelestia-repair",
-      "kind": "install",
-      "category": "appearance",
-      "name": "Repair shell colours / config",
-      "desc": "Reset caelestia to HyperWebster dark glass defaults (backs up first)",
-      "icon": "build",
-      "check": "command -v hyperwebster-caelestia-repair",
-      "install": "sh \"$HOME/.local/share/hyperwebster/caelestia-repair/install-caelestia-repair.sh\" && hyperwebster-caelestia-repair --hard"
-    },
-    {
       "id": "rounding",
       "kind": "toggle",
       "category": "appearance",
@@ -87,7 +77,7 @@
       "kind": "install",
       "category": "gaming",
       "name": "Deckify / Chimera Gaming",
-      "desc": "CachyOS/Chimera gamescope Steam session — Starman + Super+Shift+S",
+      "desc": "ChimeraOS gamescope session — Starman boot path (Super+Shift+S)",
       "icon": "gamepad",
       "check": "test -x /usr/local/bin/hyperwebster-deckify-install && /usr/local/bin/hyperwebster-gaming-session >/dev/null 2>&1",
       "install": "hyperwebster-deckify-install; sh \"$HOME/.local/share/hyperwebster/deckshift-login/install-deckshift-login.sh\""

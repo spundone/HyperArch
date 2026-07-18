@@ -23,7 +23,9 @@ if [ ! -x /usr/local/bin/switch-to-gaming ]; then
   echo "ERROR: gaming switch scripts missing (run deckshift.sh or hyperwebster-deckify-install first)."
   exit 1
 fi
-if ! /usr/local/bin/hyperwebster-gaming-session >/dev/null 2>&1; then
+if ! /usr/local/bin/hyperwebster-gaming-session >/dev/null 2>&1 \
+   && [ ! -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] \
+   && [ ! -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ]; then
   echo "ERROR: no gamescope session installed (run deckshift.sh or hyperwebster-deckify-install first)."
   exit 1
 fi
@@ -62,20 +64,8 @@ fi
 sudo install -m 0755 "$SRC/switch-to-desktop" /usr/local/bin/switch-to-desktop
 echo ":: overlaid switch-to-desktop (queued SDDM restart, fixes Super+Shift+R exit)"
 
-# 4c. Prefer Chimera SDDM restart helper when present (passwordless via sudoers).
-if [ -x "${HOME}/.local/share/hyperwebster/chimera-deckify-gaming/hyperwebster-restart-sddm" ]; then
-  sudo install -m 0755 \
-    "${HOME}/.local/share/hyperwebster/chimera-deckify-gaming/hyperwebster-restart-sddm" \
-    /usr/local/bin/hyperwebster-restart-sddm
-elif [ -x /usr/local/bin/hyperwebster-restart-sddm ]; then
-  :
-else
-  echo "NOTE: hyperwebster-restart-sddm missing — Super+Shift+S may not leave the desktop"
-fi
-
 # 5. Remove the withdrawn nested-gaming-mode bits if this box ever had them.
-rm -f "$HOME/.local/bin/hyperwebster-gaming-mode" \
-      "$HOME/.local/bin/hyperwebster-gaming-mode-exit" \
+rm -f "$HOME/.local/bin/hyperwebster-gaming-mode" "$HOME/.local/bin/hyperwebster-gaming-mode-exit" \
       "$HOME/.local/share/applications/gaming-mode.desktop"
 if [ -f "$HYPRUSER" ] && grep -qF 'gaming-mode (nested)' "$HYPRUSER"; then
   sed -i '/# >>> gaming-mode (nested) >>>/,/# <<< gaming-mode (nested) <<</d' "$HYPRUSER"
@@ -97,7 +87,7 @@ else
       case "$line" in
         'bind = Super+Shift, S, exec,'*switch-to-gaming*)
           cat <<'BINDLINE'
-bind = Super+Shift, S, exec, sh -c 'if ! [ -x /usr/local/bin/switch-to-gaming ]; then notify-send -u critical "Gaming Mode" "Helpers missing — Additions → Deckify / Chimera"; exit 1; fi; if ! /usr/local/bin/hyperwebster-gaming-session >/dev/null 2>&1; then notify-send -u critical "Gaming Mode" "No gamescope session — Additions → Deckify / Chimera"; exit 1; fi; exec /usr/local/bin/switch-to-gaming'
+bind = Super+Shift, S, exec, sh -c '[ -x /usr/local/bin/switch-to-gaming ] && { [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam-plus.desktop ]; } && exec /usr/local/bin/switch-to-gaming'
 BINDLINE
           ;;
         *)
@@ -115,7 +105,7 @@ BINDLINE
 # Super+Shift+S = Gaming Mode IF a gamescope session is installed; otherwise no-op.
 # Accepts DeckShift (-nm) and Chimera/Deckify (steam / steam-plus).
 unbind = Super+Shift, S
-bind = Super+Shift, S, exec, sh -c 'if ! [ -x /usr/local/bin/switch-to-gaming ]; then notify-send -u critical "Gaming Mode" "Helpers missing — Additions → Deckify / Chimera"; exit 1; fi; if ! /usr/local/bin/hyperwebster-gaming-session >/dev/null 2>&1; then notify-send -u critical "Gaming Mode" "No gamescope session — Additions → Deckify / Chimera"; exit 1; fi; exec /usr/local/bin/switch-to-gaming'
+bind = Super+Shift, S, exec, sh -c '[ -x /usr/local/bin/switch-to-gaming ] && { [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam-plus.desktop ]; } && exec /usr/local/bin/switch-to-gaming'
 # <<< deckshift gaming keys <<<
 EOF
     echo ":: added guarded Super+Shift+S -> switch-to-gaming"
