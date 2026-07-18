@@ -19,15 +19,14 @@ StyledRect {
     required property DrawerVisibilities visibilities
     required property BarPopouts.Wrapper popouts
 
-    // HyperWebster: the gamepad "Game Mode" toggle launches DeckShift gaming. Hide it
-    // entirely when DeckShift isn't installed (no gamescope session file) — checked
-    // once at load by deckshiftProbe below.
+    // HyperWebster: Game Mode launches gamescope (DeckShift or Chimera/Deckify).
+    // Hide the tile unless a known session desktop is present.
     property bool deckshiftInstalled: false
 
     Process {
         id: deckshiftProbe
         running: true
-        command: ["test", "-f", "/usr/share/wayland-sessions/gamescope-session-steam-nm.desktop"]
+        command: ["sh", "-c", "[ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam-plus.desktop ]"]
         onExited: (exitCode, exitStatus) => root.deckshiftInstalled = exitCode === 0
     }
 
@@ -164,7 +163,7 @@ StyledRect {
                             gmTog.launching = true;
                             gmTog.internalChecked = false; // don't latch "on"
                             relockTimer.start();
-                            Quickshell.execDetached(["sh", "-c", "[ -x /usr/local/bin/switch-to-gaming ] && [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] && exec /usr/local/bin/switch-to-gaming"]);
+                            Quickshell.execDetached(["sh", "-c", "[ -x /usr/local/bin/switch-to-gaming ] && { [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam-plus.desktop ]; } && exec /usr/local/bin/switch-to-gaming"]);
                         }
 
                         Timer {

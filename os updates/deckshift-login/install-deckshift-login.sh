@@ -72,30 +72,44 @@ if [ -f "$HYPRUSER" ] && grep -qF 'gaming-mode (nested)' "$HYPRUSER"; then
   echo ":: removed withdrawn nested gaming-mode binds"
 fi
 
-# 6. Hyprland bind: Super+Shift+S -> switch-to-gaming. The BASE config now ships a
-#    self-guarding Super+Shift+S bind (omarchy-keys-user.conf) that launches the
-#    gaming session only if DeckShift is installed and does nothing otherwise, so
-#    this installer no longer adds the bind itself. We only add a GUARDED bind as a
-#    fallback if no switch-to-gaming bind exists at all (e.g. an older base without
-#    it) — never the old unguarded form, which would break Super+Shift+S on a box
-#    where the gaming session is missing. Exit from Gaming Mode is handled INSIDE
-#    the session (DeckShift's Super+Shift+R monitor, or Steam > Power > Exit).
+# 6. Hyprland bind: Super+Shift+S -> switch-to-gaming. Always rewrite to the
+#    widened guard (DeckShift -nm OR Chimera/Deckify steam / steam-plus). Older
+#    bases only checked -nm, so Deckify installs silently no-op'd the key.
 if [ ! -f "$HYPRUSER" ]; then
   echo "NOTE: $HYPRUSER not found — base provides the guarded Super+Shift+S bind."
-elif grep -qF 'switch-to-gaming' "$HYPRUSER"; then
-  echo ":: gaming keybind already present (base provides the guarded Super+Shift+S)"
 else
-  cat >> "$HYPRUSER" << 'EOF'
+  if grep -qF 'deckshift gaming keys' "$HYPRUSER" 2>/dev/null; then
+    sed -i '/# >>> deckshift gaming keys >>>/,/# <<< deckshift gaming keys <<</d' "$HYPRUSER"
+  fi
+  if grep -qE 'bind = Super\+Shift, S, exec,.*switch-to-gaming' "$HYPRUSER"; then
+    tmp=$(mktemp)
+    while IFS= read -r line; do
+      case "$line" in
+        'bind = Super+Shift, S, exec,'*switch-to-gaming*)
+          cat <<'BINDLINE'
+bind = Super+Shift, S, exec, sh -c '[ -x /usr/local/bin/switch-to-gaming ] && { [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam-plus.desktop ]; } && exec /usr/local/bin/switch-to-gaming'
+BINDLINE
+          ;;
+        *)
+          printf '%s\n' "$line"
+          ;;
+      esac
+    done < "$HYPRUSER" > "$tmp"
+    cat "$tmp" > "$HYPRUSER"
+    rm -f "$tmp"
+    echo ":: updated Super+Shift+S guard (DeckShift + Chimera/Deckify sessions)"
+  else
+    cat >> "$HYPRUSER" << 'EOF'
 
 # >>> deckshift gaming keys >>>
-# Super+Shift+S = Gaming Mode IF DeckShift is installed; otherwise does nothing.
-# Self-guards on the gaming session file + switch-to-gaming helper. Exit happens
-# inside the session (Super+Shift+R, or Steam > Power > Exit to Desktop).
+# Super+Shift+S = Gaming Mode IF a gamescope session is installed; otherwise no-op.
+# Accepts DeckShift (-nm) and Chimera/Deckify (steam / steam-plus).
 unbind = Super+Shift, S
-bind = Super+Shift, S, exec, sh -c '[ -x /usr/local/bin/switch-to-gaming ] && [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] && exec /usr/local/bin/switch-to-gaming'
+bind = Super+Shift, S, exec, sh -c '[ -x /usr/local/bin/switch-to-gaming ] && { [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam-plus.desktop ]; } && exec /usr/local/bin/switch-to-gaming'
 # <<< deckshift gaming keys <<<
 EOF
-  echo ":: added guarded Super+Shift+S -> switch-to-gaming (base bind was absent)"
+    echo ":: added guarded Super+Shift+S -> switch-to-gaming"
+  fi
 fi
 if command -v hyprctl >/dev/null 2>&1 && hyprctl version >/dev/null 2>&1; then
   hyprctl reload >/dev/null 2>&1 || true
