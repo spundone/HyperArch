@@ -10,6 +10,10 @@ autologin marker used by DeckShift's `gaming-session-switch` - so cold boots
 via the Starman entry land in the gamescope Steam session **without** a password,
 while normal boots still show the SDDM greeter.
 
+Exit-to-desktop writes `zz-steamos-autologin.conf` (Hyprland). Starman and the
+SDDM gate clear that file when arming gamescope so it cannot override
+`zz-gaming-session.conf` (lexicographically later `Session=` would win).
+
 ## Prerequisites
 
 A gamescope session must be installed once:

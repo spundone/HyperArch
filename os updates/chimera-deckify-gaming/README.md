@@ -49,7 +49,9 @@ same CachyOS path as Steam → Switch to Desktop (`stop gamescope-session.target
 after arming `zz-steamos-autologin.conf` for `hyprland-uwsm`), not a blind
 SDDM restart (that left gamescope holding seat0/TTY1). Steam → Power → Exit
 to Desktop also works; `steamos-session-select plasma` is overlaid to target
-Hyprland instead of Plasma.
+Hyprland instead of Plasma. Starman / Super+Shift+S clear that Hyprland
+drop-in when re-entering gamescope so SDDM does not keep autologging into
+Hyprland on the next Starman boot.
 
 Do not put `gamescope-hdr.env` in `~/.config/environment.d/` globally - HDR
 WSI there applies to Hyprland too and can blank the desktop.

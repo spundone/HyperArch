@@ -46,6 +46,10 @@ case "${1:-}" in
     ;;
 esac
 
+# zz-steamos-autologin.conf (from Switch-to-Desktop) sorts after this file and
+# would override Session= on the next SDDM start.
+rm -f /etc/sddm.conf.d/zz-steamos-autologin.conf
+
 cat > "$CONF" << EOF
 [Autologin]
 User=${USER_NAME}

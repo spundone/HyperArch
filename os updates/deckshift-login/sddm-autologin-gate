@@ -5,16 +5,18 @@
 # gaming-session-switch writes the autologin drop-in AND touches the marker.
 # This gate runs every time SDDM starts:
 #   - marker present  -> a switch is in flight: consume the marker, keep the
-#                        drop-in, SDDM autologins into the target session once;
+#                        gaming drop-in, drop leftover Switch-to-Desktop conf
+#                        (zz-steamos sorts after zz-gaming and would steal Session=);
 #   - marker absent   -> cold boot / crash / manual restart: delete any stale
-#                        drop-in so the normal password greeter shows.
+#                        drop-ins so the normal password greeter shows.
 # /run is tmpfs, so the marker can never survive a reboot.
 CONF="/etc/sddm.conf.d/zz-gaming-session.conf"
+STEAMOS="/etc/sddm.conf.d/zz-steamos-autologin.conf"
 MARKER="/run/deckshift-session-switch"
 
 if [[ -f "$MARKER" ]]; then
-  rm -f "$MARKER"
+  rm -f "$MARKER" "$STEAMOS"
 else
-  rm -f "$CONF"
+  rm -f "$CONF" "$STEAMOS"
 fi
 exit 0

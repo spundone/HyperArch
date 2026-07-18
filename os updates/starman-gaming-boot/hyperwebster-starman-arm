@@ -39,6 +39,10 @@ done
 USER_NAME="${USER_NAME:-$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 { print $1; exit }')}"
 [[ -n "$USER_NAME" ]] || { echo "hyperwebster-starman: no desktop user found" >&2; exit 1; }
 
+# Switch-to-Desktop leaves zz-steamos-autologin.conf (Hyprland). That file sorts
+# after zz-gaming-session.conf, so Session=hyprland wins over Starman gamescope.
+rm -f /etc/sddm.conf.d/zz-steamos-autologin.conf
+
 cat > "$CONF" << EOF
 [Autologin]
 User=${USER_NAME}
