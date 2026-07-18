@@ -9,6 +9,12 @@ stock Arch ISO into a fully offline Hyprland + caelestia installer.
 See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware guidance and
 [docs/CREDITS.md](docs/CREDITS.md) for full upstream attribution.
 
+## Demo
+
+[![HyperWebster OS demo](https://img.youtube.com/vi/AKwGuXvT4s8/maxresdefault.jpg)](https://youtu.be/AKwGuXvT4s8)
+
+Watch on YouTube: [https://youtu.be/AKwGuXvT4s8](https://youtu.be/AKwGuXvT4s8)
+
 > HyperWebster is the *ISO builder*. It bundles and installs the upstream caelestia
 > dotfiles; it is not affiliated with that project.
 
