@@ -2,6 +2,9 @@
 # hyperwebster-blur-toggle — frosted glass for shell panels and launcher.
 # Fresh installs enable blur by default; disable for a fully flat look.
 # Corner rounding is separate: hyperwebster-rounding-toggle.
+#
+# NoSignal top bar is WlrLayershell namespace "nsbar"; popups use "nspanels".
+# Older rules matched caelestia-.* / qs-.* and never blurred the bar.
 set -euo pipefail
 
 HYPRVARS="${HOME}/.config/caelestia/hypr-vars.conf"
@@ -57,22 +60,39 @@ set_overview() {
   fi
 }
 
+blur_block() {
+  cat <<'EOF'
+# >>> hyperwebster-blur-toggle >>>
+# Frosted glass for NoSignal NsBar / panels (Hyprland 0.55+ rule syntax).
+# Namespaces: nsbar (top bar), nspanels (popouts). Keep caelestia-drawers for
+# any leftover drawer surfaces. Global blur comes from $blurEnabled in hypr-vars.
+layerrule = blur on, match:namespace nsbar
+layerrule = ignore_alpha 0.57, match:namespace nsbar
+layerrule = blur on, match:namespace nspanels
+layerrule = ignore_alpha 0.57, match:namespace nspanels
+layerrule = blur on, match:namespace caelestia-drawers
+layerrule = ignore_alpha 0.57, match:namespace caelestia-drawers
+# <<< hyperwebster-blur-toggle <<<
+EOF
+}
+
 set_layer_rules() {
   local on="$1"
   [ -f "$HYPRUSER" ] || return 0
-  if [ "$on" = 1 ]; then
-    grep -qF "$MARK_BEGIN" "$HYPRUSER" && return 0
-    cat >> "$HYPRUSER" <<'EOF'
-
-# >>> hyperwebster-blur-toggle >>>
-# Frosted glass for caelestia shell layers (Hyprland 0.55+ rule syntax).
-layerrule = blur on, match:namespace caelestia-.*
-layerrule = blur on, match:namespace qs-.*
-layerrule = ignore_alpha 0.57, match:namespace caelestia-.*
-# <<< hyperwebster-blur-toggle <<<
-EOF
-  else
+  # Always drop the previous marked block so re-enable upgrades namespaces.
+  if grep -qF "$MARK_BEGIN" "$HYPRUSER" 2>/dev/null; then
     sed -i "/$MARK_BEGIN/,/$MARK_END/d" "$HYPRUSER" 2>/dev/null || true
+  fi
+  # Also strip legacy ignorealpha / wrong-namespace one-offs if present.
+  sed -i \
+    -e '/layerrule = .*match:namespace caelestia-\.\*/d' \
+    -e '/layerrule = .*match:namespace qs-\.\*/d' \
+    -e '/ignorealpha/d' \
+    "$HYPRUSER" 2>/dev/null || true
+
+  if [ "$on" = 1 ]; then
+    printf '\n' >> "$HYPRUSER"
+    blur_block >> "$HYPRUSER"
   fi
 }
 
@@ -88,7 +108,8 @@ apply() {
     hyprctl reload >/dev/null 2>&1 || true
   fi
   if [ "$on" = 1 ]; then
-    echo "Frosted glass enabled (blur + shell transparency)."
+    echo "Frosted glass enabled (nsbar/nspanels blur + shell transparency)."
+    echo "Restart the shell if the bar is still flat: Ctrl+Super+Alt+R"
   else
     echo "Flat/restrained look restored (blur off)."
   fi
