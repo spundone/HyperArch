@@ -59,4 +59,4 @@ if command -v hyprctl >/dev/null 2>&1 && hyprctl version >/dev/null 2>&1; then
   hyprctl reload >/dev/null 2>&1 || true
 fi
 
-echo "hypersmooth-display: tuned for 120/144 Hz (vfr + snappier shell animations)"
+echo "hypersmooth-display: tuned for 120/144 Hz (snappier shell animations)"

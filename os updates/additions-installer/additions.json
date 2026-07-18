@@ -45,7 +45,7 @@
       "kind": "toggle",
       "category": "appearance",
       "name": "Hypersmooth 120/144 Hz",
-      "desc": "VFR + snappier shell animation durations",
+      "desc": "Snappier shell animation durations for 120/144 Hz",
       "icon": "bolt",
       "check": "hyperwebster-hypersmooth-toggle status",
       "enable": "hyperwebster-hypersmooth-toggle enable",

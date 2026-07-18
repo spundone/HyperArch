@@ -6,9 +6,9 @@ fragment to revert Hyprland-side changes.
 
 ## What changes
 
-- `misc { vfr = true }` - variable frame rate (pairs with VRR TVs/monitors)
 - Shorter Hyprland animation multipliers (~2-3 frames at 144 Hz)
 - `shell-tokens.json` `animDurations` scaled for snappier Quickshell transitions
+- (Hyprland 0.55+ no longer exposes `misc:vfr`; VFR is the default)
 
 ## Files
 
@@ -17,5 +17,4 @@ fragment to revert Hyprland-side changes.
 
 ## Note
 
-The TV HDR profile (`tv-gaming-display`) also sets `vfr`; both fragments are
-compatible. Apply `hyprmoncfg apply tv-gaming-4k` for 4K144 HDR output.
+Apply `hyprmoncfg apply tv-gaming-4k` for 4K144 HDR output (see `tv-gaming-display`).
