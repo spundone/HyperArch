@@ -2715,6 +2715,8 @@ CHROOTHOST
       SHELL_ROOT="$OFFLINE/aur/$name.fork" sh "$HYPERWEBSTER_LAYER_DIR/shell-branding/patch-shell-branding.sh"
       # Shallow pin has no tags — upstream pkgver() (git describe --tags) fails or
       # can emit illegal pkgver chars. Drop pkgver() and pin a legal static version.
+      # CMakeLists also wants git describe for VERSION unless -DVERSION / -DGIT_REVISION
+      # are passed; set those on the cmake line and omit .git from the tarball.
       shell_short="${HYPERWEBSTER_SHELL_COMMIT:0:7}"
       tar -czf "$OFFLINE/aur/$name/nosignal-shell.tar.gz" \
         -C "$OFFLINE/aur" \
@@ -2734,6 +2736,7 @@ CHROOTHOST
         -e 's|^source=.*|source=("nosignal-shell.tar.gz")|' \
         -e "s|^sha256sums=.*|sha256sums=('SKIP')|" \
         -e "s|^pkgver=.*|pkgver=2.0.2.r0.g${shell_short}|" \
+        -e "s|-DCMAKE_INSTALL_PREFIX=/-|-DCMAKE_INSTALL_PREFIX=/ -DVERSION=2.0.2 -DGIT_REVISION=${HYPERWEBSTER_SHELL_COMMIT}|" \
         -e 's|DDISTRIBUTOR="NoSignal (package: $_pkgname)"|DDISTRIBUTOR="HyperWebster (package: $_pkgname)"|' \
         -e 's|pkgdesc="NoSignal desktop shell|pkgdesc="HyperWebster desktop shell|' \
         "$OFFLINE/aur/$name/PKGBUILD"
