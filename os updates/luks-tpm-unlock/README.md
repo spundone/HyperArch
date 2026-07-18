@@ -92,6 +92,6 @@ After any enrollment or hook change, `hyperwebster-luks-tpm-enroll` rebuilds the
 
 ## Plymouth unlock splash
 
-Starman-branded passphrase dialog (scaled for TV). Theme lives in
-`assets/plymouth/hyperwebster/` (ISO) and is refreshed here via
+Pitch-black Starman **ASCII** passphrase dialog (no bitmap astronaut). Theme
+lives in `assets/plymouth/hyperwebster/` (ISO) and is refreshed here via
 `install-luks-tpm-unlock.sh` / `hyperwebster-update`.

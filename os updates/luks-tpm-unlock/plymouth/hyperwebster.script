@@ -1,9 +1,8 @@
-# HyperWebster Plymouth — Starman unlock splash.
-# Tuned for TV / couch distance: larger type, scaled logo, calm passphrase UX.
-# Soft Tokyo Night gradient; passphrase dialog when TPM auto-unlock is unavailable.
+# HyperWebster Plymouth — pitch-black Starman ASCII unlock splash.
+# No bitmap astronaut; monospace art + passphrase field for TPM fallback.
 
-Window.SetBackgroundTopColor(0.086, 0.090, 0.133);    # #16161e
-Window.SetBackgroundBottomColor(0.101, 0.105, 0.149); # #1a1b26
+Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
+Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
 
 screen_width = Window.GetWidth();
 screen_height = Window.GetHeight();
@@ -12,104 +11,159 @@ if (screen_height < screen_width) {
   shortest = screen_height;
 }
 
-# Scale Starman for the display (readable on 1080p and 4K).
-logo_src = Image("logo.png");
-logo_target = Math.Int(shortest * 0.22);
-if (logo_target < 200) {
-  logo_target = 200;
+# Monospace sizes scale with panel height (TV-readable).
+fs_art = Math.Int(screen_height / 48);
+if (fs_art < 14) {
+  fs_art = 14;
 }
-if (logo_target > 360) {
-  logo_target = 360;
+if (fs_art > 28) {
+  fs_art = 28;
 }
-logo_scale = logo_target / logo_src.GetWidth();
-logo.image = logo_src.Scale(logo_target, Math.Int(logo_src.GetHeight() * logo_scale));
-logo.sprite = Sprite(logo.image);
-
-# Composition sits slightly above center so the passphrase field has room below.
-block_gap = Math.Int(shortest * 0.018);
-if (block_gap < 10) {
-  block_gap = 10;
+fs_brand = Math.Int(screen_height / 36);
+if (fs_brand < 20) {
+  fs_brand = 20;
 }
-
-# Font sizes scale with panel height (Plymouth Image.Text pango font string).
-fs_brand = Math.Int(screen_height / 42);
-if (fs_brand < 22) {
-  fs_brand = 22;
+if (fs_brand > 40) {
+  fs_brand = 40;
 }
-if (fs_brand > 42) {
-  fs_brand = 42;
+fs_sub = Math.Int(screen_height / 42);
+if (fs_sub < 16) {
+  fs_sub = 16;
 }
-fs_star = Math.Int(screen_height / 36);
-if (fs_star < 26) {
-  fs_star = 26;
-}
-if (fs_star > 52) {
-  fs_star = 52;
+if (fs_sub > 32) {
+  fs_sub = 32;
 }
 fs_label = Math.Int(screen_height / 48);
-if (fs_label < 18) {
-  fs_label = 18;
+if (fs_label < 16) {
+  fs_label = 16;
 }
-if (fs_label > 32) {
-  fs_label = 32;
+if (fs_label > 28) {
+  fs_label = 28;
 }
 fs_hint = Math.Int(screen_height / 56);
-if (fs_hint < 14) {
-  fs_hint = 14;
+if (fs_hint < 13) {
+  fs_hint = 13;
 }
-if (fs_hint > 24) {
-  fs_hint = 24;
+if (fs_hint > 22) {
+  fs_hint = 22;
 }
 
-font_brand = "Noto Sans Bold " + fs_brand;
-font_star = "Noto Sans Bold " + fs_star;
-font_label = "Noto Sans Regular " + fs_label;
-font_hint = "Noto Sans Regular " + fs_hint;
+font_art = "JetBrainsMono Nerd Font " + fs_art;
+font_brand = "JetBrainsMono Nerd Font Bold " + fs_brand;
+font_sub = "JetBrainsMono Nerd Font " + fs_sub;
+font_label = "JetBrainsMono Nerd Font " + fs_label;
+font_hint = "JetBrainsMono Nerd Font " + fs_hint;
 
-# Prefetch text metrics so we can center the whole stack.
-title.image = Image.Text("HYPERWEBSTER OS", 0.70, 0.87, 0.49, 1.0, font_brand);
-subtitle.image = Image.Text("STARMAN", 0.55, 0.70, 0.98, 1.0, font_star);
-unlock_label.image = Image.Text("Enter disk passphrase", 0.86, 0.90, 0.88, 1.0, font_label);
+# Fallback if JetBrains isn't in the initramfs font set.
+# Plymouth picks the first available face from the family string when possible;
+# Noto Sans Mono ships in BASE_PKGS and is more likely in the initrd.
+font_art_fb = "Noto Sans Mono " + fs_art;
+font_brand_fb = "Noto Sans Mono Bold " + fs_brand;
+font_sub_fb = "Noto Sans Mono " + fs_sub;
+font_label_fb = "Noto Sans Mono " + fs_label;
+font_hint_fb = "Noto Sans Mono " + fs_hint;
+
+# Starman mark (same compact art as the live installer).
+# Green on black — #9ece6a ≈ 0.62, 0.81, 0.42
+art_r = 0.62;
+art_g = 0.81;
+art_b = 0.42;
+
+art_lines[0] = "          .          ";
+art_lines[1] = "         ...         ";
+art_lines[2] = "     ..  ...  ..     ";
+art_lines[3] = "    .oo.......oo.    ";
+art_lines[4] = "    .o88o...o88o.    ";
+art_lines[5] = "     .888o.o888.     ";
+art_lines[6] = "      ..o888o..      ";
+art_lines[7] = "        .....        ";
+art_lines[8] = "         ...         ";
+art_lines[9] = "          .          ";
+art_count = 10;
+
+art_images = [];
+art_sprites = [];
+art_h = 0;
+art_w = 0;
+for (i = 0; i < art_count; i++) {
+  img = Image.Text(art_lines[i], art_r, art_g, art_b, 1.0, font_art);
+  if (img.GetWidth() < 8) {
+    img = Image.Text(art_lines[i], art_r, art_g, art_b, 1.0, font_art_fb);
+  }
+  art_images[i] = img;
+  if (img.GetWidth() > art_w) {
+    art_w = img.GetWidth();
+  }
+  art_h = art_h + img.GetHeight();
+}
+
+title.image = Image.Text("HYPERWEBSTER OS", art_r, art_g, art_b, 1.0, font_brand);
+if (title.image.GetWidth() < 8) {
+  title.image = Image.Text("HYPERWEBSTER OS", art_r, art_g, art_b, 1.0, font_brand_fb);
+}
+subtitle.image = Image.Text("STARMAN", 0.75, 0.75, 0.78, 1.0, font_sub);
+if (subtitle.image.GetWidth() < 8) {
+  subtitle.image = Image.Text("STARMAN", 0.75, 0.75, 0.78, 1.0, font_sub_fb);
+}
+unlock_label.image = Image.Text("enter disk passphrase", 0.82, 0.82, 0.84, 1.0, font_label);
+if (unlock_label.image.GetWidth() < 8) {
+  unlock_label.image = Image.Text("enter disk passphrase", 0.82, 0.82, 0.84, 1.0, font_label_fb);
+}
 unlock_hint.image = Image.Text(
-  "USB keyboard recommended for controllers",
-  0.58, 0.65, 0.72, 1.0, font_hint);
+  "usb keyboard recommended for controllers",
+  0.45, 0.45, 0.48, 1.0, font_hint);
+if (unlock_hint.image.GetWidth() < 8) {
+  unlock_hint.image = Image.Text(
+    "usb keyboard recommended for controllers",
+    0.45, 0.45, 0.48, 1.0, font_hint_fb);
+}
 
 entry_src = Image("entry.png");
-# Widen entry on large panels without exceeding 42% of width.
-entry_w = Math.Int(screen_width * 0.34);
-if (entry_w < 420) {
-  entry_w = 420;
+entry_w = Math.Int(screen_width * 0.32);
+if (entry_w < 400) {
+  entry_w = 400;
 }
-if (entry_w > 640) {
-  entry_w = 640;
+if (entry_w > 600) {
+  entry_w = 600;
 }
 entry_h = Math.Int(entry_src.GetHeight() * (entry_w / entry_src.GetWidth()));
-if (entry_h < 52) {
-  entry_h = 52;
+if (entry_h < 48) {
+  entry_h = 48;
 }
 entry.image = entry_src.Scale(entry_w, entry_h);
 
-stack_h = logo.image.GetHeight() + block_gap + title.image.GetHeight()
-  + Math.Int(block_gap * 0.45) + subtitle.image.GetHeight()
-  + Math.Int(block_gap * 1.4) + unlock_label.image.GetHeight()
-  + Math.Int(block_gap * 0.6) + entry.image.GetHeight();
-stack_top = screen_height / 2 - stack_h / 2 - Math.Int(screen_height * 0.04);
-if (stack_top < Math.Int(screen_height * 0.08)) {
-  stack_top = Math.Int(screen_height * 0.08);
+block_gap = Math.Int(shortest * 0.014);
+if (block_gap < 8) {
+  block_gap = 8;
 }
 
-logo.sprite.SetX(screen_width / 2 - logo.image.GetWidth() / 2);
-logo.sprite.SetY(stack_top);
-logo.sprite.SetOpacity(1);
+stack_h = art_h + block_gap + title.image.GetHeight()
+  + Math.Int(block_gap * 0.4) + subtitle.image.GetHeight()
+  + Math.Int(block_gap * 1.2) + unlock_label.image.GetHeight()
+  + Math.Int(block_gap * 0.5) + entry.image.GetHeight()
+  + Math.Int(block_gap * 0.8) + unlock_hint.image.GetHeight();
+stack_top = screen_height / 2 - stack_h / 2;
+if (stack_top < Math.Int(screen_height * 0.06)) {
+  stack_top = Math.Int(screen_height * 0.06);
+}
+
+y = stack_top;
+for (i = 0; i < art_count; i++) {
+  art_sprites[i] = Sprite(art_images[i]);
+  art_sprites[i].SetX(screen_width / 2 - art_images[i].GetWidth() / 2);
+  art_sprites[i].SetY(y);
+  art_sprites[i].SetOpacity(1);
+  y = y + art_images[i].GetHeight();
+}
 
 title.sprite = Sprite(title.image);
 title.sprite.SetX(screen_width / 2 - title.image.GetWidth() / 2);
-title.sprite.SetY(logo.sprite.GetY() + logo.image.GetHeight() + block_gap);
+title.sprite.SetY(y + block_gap);
 title.sprite.SetOpacity(1);
 
 subtitle.sprite = Sprite(subtitle.image);
 subtitle.sprite.SetX(screen_width / 2 - subtitle.image.GetWidth() / 2);
-subtitle.sprite.SetY(title.sprite.GetY() + title.image.GetHeight() + Math.Int(block_gap * 0.45));
+subtitle.sprite.SetY(title.sprite.GetY() + title.image.GetHeight() + Math.Int(block_gap * 0.4));
 subtitle.sprite.SetOpacity(1);
 
 # Fake progress while cryptsetup waits on TPM / passphrase.
@@ -195,38 +249,38 @@ bullet.image = Image("bullet.png");
 entry.sprite = Sprite(entry.image);
 entry.x = screen_width / 2 - entry.image.GetWidth() / 2;
 entry.y = subtitle.sprite.GetY() + subtitle.image.GetHeight()
-  + Math.Int(block_gap * 1.4) + unlock_label.image.GetHeight()
-  + Math.Int(block_gap * 0.6);
+  + Math.Int(block_gap * 1.2) + unlock_label.image.GetHeight()
+  + Math.Int(block_gap * 0.5);
 entry.sprite.SetPosition(entry.x, entry.y, 10001);
 entry.sprite.SetOpacity(0);
 
-lock_height = entry.image.GetHeight() * 0.85;
+lock_height = entry.image.GetHeight() * 0.7;
 lock_scale = lock_height / lock.image.GetHeight();
 lock_width = lock.image.GetWidth() * lock_scale;
 scaled_lock = lock.image.Scale(lock_width, lock_height);
 lock.sprite = Sprite(scaled_lock);
-lock.x = entry.x - lock_width - Math.Int(block_gap * 1.2);
+lock.x = entry.x - lock_width - Math.Int(block_gap * 1.1);
 lock.y = entry.y + entry.image.GetHeight() / 2 - lock_height / 2;
 lock.sprite.SetPosition(lock.x, lock.y, 10001);
 lock.sprite.SetOpacity(0);
 
 unlock_label.sprite = Sprite(unlock_label.image);
 unlock_label.sprite.SetX(screen_width / 2 - unlock_label.image.GetWidth() / 2);
-unlock_label.sprite.SetY(entry.y - unlock_label.image.GetHeight() - Math.Int(block_gap * 0.6));
+unlock_label.sprite.SetY(entry.y - unlock_label.image.GetHeight() - Math.Int(block_gap * 0.5));
 unlock_label.sprite.SetOpacity(0);
 
 unlock_hint.sprite = Sprite(unlock_hint.image);
 unlock_hint.sprite.SetX(screen_width / 2 - unlock_hint.image.GetWidth() / 2);
-unlock_hint.sprite.SetY(entry.y + entry.image.GetHeight() + Math.Int(block_gap * 0.9));
+unlock_hint.sprite.SetY(entry.y + entry.image.GetHeight() + Math.Int(block_gap * 0.8));
 unlock_hint.sprite.SetOpacity(0);
 
 bullet.sprites = [];
-bullet_size = Math.Int(entry.image.GetHeight() * 0.22);
-if (bullet_size < 8) {
-  bullet_size = 8;
+bullet_size = Math.Int(entry.image.GetHeight() * 0.2);
+if (bullet_size < 7) {
+  bullet_size = 7;
 }
-if (bullet_size > 14) {
-  bullet_size = 14;
+if (bullet_size > 12) {
+  bullet_size = 12;
 }
 
 fun display_normal_callback() {
@@ -254,7 +308,7 @@ fun display_password_callback(prompt, bullets) {
     bullets_to_show = max_bullets;
   }
 
-  gap = Math.Int(bullet_size * 0.7);
+  gap = Math.Int(bullet_size * 0.65);
   if (gap < 4) {
     gap = 4;
   }
@@ -313,7 +367,10 @@ message_sprite = Sprite();
 message_sprite.SetPosition(Math.Int(screen_width * 0.03), Math.Int(screen_height * 0.03), 10000);
 
 fun display_message_callback(text) {
-  message = Image.Text(text, 0.70, 0.87, 0.49, 1.0, font_hint);
+  message = Image.Text(text, art_r, art_g, art_b, 1.0, font_hint);
+  if (message.GetWidth() < 8) {
+    message = Image.Text(text, art_r, art_g, art_b, 1.0, font_hint_fb);
+  }
   message_sprite.SetImage(message);
   message_sprite.SetOpacity(1);
 }
@@ -326,7 +383,9 @@ Plymouth.SetDisplayMessageFunction(display_message_callback);
 Plymouth.SetHideMessageFunction(hide_message_callback);
 
 fun quit_callback() {
-  logo.sprite.SetOpacity(1);
+  for (i = 0; i < art_count; i++) {
+    art_sprites[i].SetOpacity(1);
+  }
   title.sprite.SetOpacity(1);
   subtitle.sprite.SetOpacity(1);
 }

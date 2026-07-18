@@ -1,9 +1,9 @@
 [Plymouth Theme]
 Name=HyperWebster
-Description=HyperWebster Starman unlock splash (TV-readable passphrase UX)
+Description=HyperWebster pitch-black Starman ASCII unlock splash
 ModuleName=script
 
 [script]
 ImageDir=/usr/share/plymouth/themes/hyperwebster
 ScriptFile=/usr/share/plymouth/themes/hyperwebster/hyperwebster.script
-MonospaceFont=Noto Sans Regular
+MonospaceFont=Noto Sans Mono
