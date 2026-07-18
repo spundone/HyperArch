@@ -175,10 +175,18 @@ MagicDNS and subnet routes are configured in the [Tailscale admin console](https
 Extra internal or USB data drives are **premounted at boot** under
 `/mnt/<label>` (see [drive-automount](../os%20updates/drive-automount/README.md)).
 System disks (root, EFI, LUKS, home subvolume) are never touched. Entries use
-`nofail` so a missing drive never blocks boot.
+`nofail` so a missing drive never blocks boot. The service runs **before SDDM**
+so Starman / gamescope see library paths at session start.
+
+exFAT, vfat, and NTFS mounts use the desktop user's `uid`/`gid` so Steam can
+write under `/mnt/...`. Prefer stable Steam library paths like
+`/mnt/<label>/SteamLibrary` (not `/run/media/...`). exFAT has no real
+symlinks - keep Proton prefixes on ext4/btrfs when possible.
+
+Manage disks in **Settings → System tools → Drives** (remount, ignore/include).
+Run `hyperwebster-drives remount` after hot-plugging a new disk.
 
 Supported filesystems: ext4, btrfs, xfs, exfat, ntfs, f2fs, and non-EFI vfat.
-Run `sudo hyperwebster-drive-automount` after hot-plugging a new disk.
 
 ## Desktop polish
 

@@ -1,12 +1,14 @@
 #!/bin/bash
 # hyperwebster-drive-automount — mount non-system data drives at boot.
 # Regenerates /etc/fstab.d/99-hyperwebster-automount.conf and mounts entries.
-# Skips root, boot/EFI, LUKS containers, swap, and optical/loop devices.
+# Skips root, boot/EFI, LUKS containers, swap, optical/loop, and ignored UUIDs.
 set -euo pipefail
 
 FSTAB_FRAGMENT=/etc/fstab.d/99-hyperwebster-automount.conf
+IGNORE_FILE=/etc/hyperwebster/drive-automount-ignore
 MOUNT_ROOT=/mnt
 ALLOW_RE='^(ext4|btrfs|xfs|vfat|exfat|ntfs|ntfs3|f2fs)$'
+FAT_RE='^(exfat|vfat|ntfs|ntfs3)$'
 
 sanitize_name() {
   local label="$1" uuid="$2"
@@ -16,6 +18,34 @@ sanitize_name() {
   fi
   [ -n "$name" ] || name="disk-${uuid:0:8}"
   printf '%s' "$name"
+}
+
+resolve_desktop_user() {
+  local u
+  for u in $(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 { print $1 }'); do
+    if getent group wheel >/dev/null 2>&1 && getent group wheel | grep -qw "$u"; then
+      printf '%s' "$u"
+      return 0
+    fi
+  done
+  getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 { print $1; exit }'
+}
+
+is_ignored() {
+  local uuid="$1"
+  [ -f "$IGNORE_FILE" ] || return 1
+  grep -qiE "^[[:space:]]*${uuid}([[:space:]]|#|$)" "$IGNORE_FILE" 2>/dev/null
+}
+
+mount_opts_for() {
+  local fst="$1" uid="$2" gid="$3"
+  local base="nofail,x-systemd.device-timeout=5,x-gvfs-show"
+  if [[ "$fst" =~ $FAT_RE ]] && [ -n "$uid" ] && [ -n "$gid" ]; then
+    # Steam libraries on exFAT/NTFS need a writable owner (not root).
+    printf '%s,uid=%s,gid=%s,umask=022' "$base" "$uid" "$gid"
+  else
+    printf '%s' "$base"
+  fi
 }
 
 declare -A SKIP_DEVS=()
@@ -35,20 +65,54 @@ while read -r src; do
   add_skip_tree "$src"
 done < <(findmnt -rn -o SOURCE / /boot /home /.snapshots /var/log 2>/dev/null || true)
 
+USER_NAME=$(resolve_desktop_user || true)
+USER_UID=""
+USER_GID=""
+if [ -n "${USER_NAME:-}" ]; then
+  USER_UID=$(id -u "$USER_NAME" 2>/dev/null || true)
+  USER_GID=$(id -g "$USER_NAME" 2>/dev/null || true)
+fi
+
+install -d -m 755 /etc/hyperwebster
+install -d -m 755 "$MOUNT_ROOT"
+[ -f "$IGNORE_FILE" ] || : > "$IGNORE_FILE"
+
+# Previous automount targets (for unmounting ignored / removed entries).
+declare -A PREV_MPS=()
+if [ -f "$FSTAB_FRAGMENT" ]; then
+  while read -r line; do
+    [[ "$line" =~ ^UUID= ]] || continue
+    mp=$(awk '{print $2}' <<<"$line")
+    [ -n "$mp" ] && PREV_MPS["$mp"]=1
+  done < "$FSTAB_FRAGMENT"
+fi
+
 tmp=$(mktemp)
 {
   echo "# HyperWebster drive automount — managed by hyperwebster-drive-automount.service"
   echo "# Data partitions mount under ${MOUNT_ROOT}/<label> with nofail."
+  echo "# FAT/NTFS get uid/gid of the primary desktop user for Steam library writes."
 } > "$tmp"
+
+declare -A NEW_MPS=()
 
 while read -r name fstype label uuid mountpoint parttype; do
   [ -n "$fstype" ] || continue
   [[ "$fstype" =~ $ALLOW_RE ]] || continue
   [ "$fstype" = "swap" ] && continue
+  [ -n "$uuid" ] || continue
+
+  if is_ignored "$uuid"; then
+    continue
+  fi
 
   dev="/dev/$name"
   [ -n "${SKIP_DEVS[$dev]:-}" ] && continue
-  [ -n "$mountpoint" ] && continue
+
+  # Already mounted elsewhere (user/manual) — leave alone unless under /mnt.
+  if [ -n "$mountpoint" ] && [[ "$mountpoint" != "$MOUNT_ROOT"/* ]]; then
+    continue
+  fi
 
   # Skip EFI system partitions (vfat marked as ESP).
   if [ "$fstype" = "vfat" ] && [[ "${parttype:-}" == *"esp"* || "${parttype:-}" == *"EFI"* ]]; then
@@ -56,14 +120,16 @@ while read -r name fstype label uuid mountpoint parttype; do
   fi
   # Skip tiny vfat slices that are likely EFI leftovers.
   if [ "$fstype" = "vfat" ]; then
-  size=$(lsblk -b -dn -o SIZE "$dev" 2>/dev/null || echo 0)
+    size=$(lsblk -b -dn -o SIZE "$dev" 2>/dev/null || echo 0)
     [ "${size:-0}" -lt 536870912 ] && continue
   fi
 
   target_name=$(sanitize_name "$label" "$uuid")
   target="${MOUNT_ROOT}/${target_name}"
+  opts=$(mount_opts_for "$fstype" "${USER_UID:-}" "${USER_GID:-}")
   mkdir -p "$target"
-  echo "UUID=$uuid $target $fstype nofail,x-systemd.device-timeout=5,x-gvfs-show 0 0" >> "$tmp"
+  echo "UUID=$uuid $target $fstype $opts 0 0" >> "$tmp"
+  NEW_MPS["$target"]=1
 done < <(lsblk -f -n -o NAME,FSTYPE,LABEL,UUID,MOUNTPOINT,PARTTYPE)
 
 install -Dm0644 "$tmp" "$FSTAB_FRAGMENT"
@@ -71,15 +137,30 @@ rm -f "$tmp"
 
 systemctl daemon-reload 2>/dev/null || true
 
+# Drop mounts we previously managed that are no longer in the fragment (ignored).
+for mp in "${!PREV_MPS[@]}"; do
+  [ -n "${NEW_MPS[$mp]:-}" ] && continue
+  if findmnt -rn "$mp" >/dev/null 2>&1 || mountpoint -q "$mp" 2>/dev/null; then
+    umount "$mp" 2>/dev/null || umount -l "$mp" 2>/dev/null || true
+  fi
+done
+
 while read -r line; do
   [[ "$line" =~ ^UUID= ]] || continue
   uuid=${line#UUID=}; uuid=${uuid%% *}
   mp=$(awk '{print $2}' <<<"$line")
   fst=$(awk '{print $3}' <<<"$line")
   opts=$(awk '{print $4}' <<<"$line")
-  findmnt -rn "$mp" >/dev/null 2>&1 && continue
-  mountpoint -q "$mp" 2>/dev/null && continue
   mkdir -p "$mp"
+
+  if findmnt -rn "$mp" >/dev/null 2>&1 || mountpoint -q "$mp" 2>/dev/null; then
+    # Refresh FAT/NTFS uid/gid without a full unmount when possible.
+    if [[ "$fst" =~ $FAT_RE ]]; then
+      mount -t "$fst" -o "remount,$opts" "$mp" 2>/dev/null \
+        || { umount "$mp" 2>/dev/null || true; mount -t "$fst" -o "$opts" "UUID=$uuid" "$mp" 2>/dev/null || true; }
+    fi
+    continue
+  fi
   mount -t "$fst" -o "$opts" "UUID=$uuid" "$mp" 2>/dev/null || true
 done < "$FSTAB_FRAGMENT"
 

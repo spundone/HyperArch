@@ -1,0 +1,246 @@
+#!/bin/bash
+# hyperwebster-drives — status / remount / ignore helpers for Nexus System tools.
+set -euo pipefail
+
+IGNORE_FILE=/etc/hyperwebster/drive-automount-ignore
+FSTAB_FRAGMENT=/etc/fstab.d/99-hyperwebster-automount.conf
+MOUNT_ROOT=/mnt
+ALLOW_RE='^(ext4|btrfs|xfs|vfat|exfat|ntfs|ntfs3|f2fs)$'
+FAT_RE='^(exfat|vfat|ntfs|ntfs3)$'
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <command>
+
+  status [--json]     List secondary drives and automount state
+  remount             Run hyperwebster-drive-automount (needs root/sudo)
+  ignore <uuid>       Exclude UUID from automount and remount
+  unignore <uuid>     Include UUID again and remount
+  open <path>         xdg-open a mountpoint
+EOF
+}
+
+is_ignored() {
+  local uuid="$1"
+  [ -f "$IGNORE_FILE" ] || return 1
+  grep -qiE "^[[:space:]]*${uuid}([[:space:]]|#|$)" "$IGNORE_FILE" 2>/dev/null
+}
+
+ensure_ignore_file() {
+  if [[ ${EUID:-0} -eq 0 ]]; then
+    install -d -m 755 /etc/hyperwebster
+    [ -f "$IGNORE_FILE" ] || : > "$IGNORE_FILE"
+  fi
+}
+
+run_automount() {
+  if [[ ${EUID:-0} -eq 0 ]]; then
+    /usr/local/bin/hyperwebster-drive-automount
+  elif sudo -n /usr/local/bin/hyperwebster-drive-automount >/dev/null 2>&1; then
+    :
+  else
+    echo "need root: sudo hyperwebster-drive-automount" >&2
+    exit 1
+  fi
+}
+
+emit_status_json() {
+  python3 - "$@" <<'PY'
+import json, os, re, subprocess, sys
+
+IGNORE = "/etc/hyperwebster/drive-automount-ignore"
+FSTAB = "/etc/fstab.d/99-hyperwebster-automount.conf"
+ALLOW = re.compile(r"^(ext4|btrfs|xfs|vfat|exfat|ntfs|ntfs3|f2fs)$")
+FAT = re.compile(r"^(exfat|vfat|ntfs|ntfs3)$")
+MOUNT_ROOT = "/mnt"
+
+def ignored_uuids():
+    out = set()
+    if not os.path.isfile(IGNORE):
+        return out
+    with open(IGNORE) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if line:
+                out.add(line.lower())
+    return out
+
+def automount_map():
+    """uuid -> mountpoint from our fragment."""
+    m = {}
+    if not os.path.isfile(FSTAB):
+        return m
+    with open(FSTAB) as f:
+        for line in f:
+            if not line.startswith("UUID="):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            uuid = parts[0].split("=", 1)[1]
+            m[uuid.lower()] = parts[1]
+    return m
+
+def service_enabled():
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-enabled", "hyperwebster-drive-automount.service"],
+            capture_output=True, text=True, check=False,
+        )
+        return r.stdout.strip() == "enabled"
+    except Exception:
+        return False
+
+ign = ignored_uuids()
+auto = automount_map()
+drives = []
+
+try:
+    raw = subprocess.check_output(
+        ["lsblk", "-Jb", "-o", "NAME,FSTYPE,LABEL,UUID,MOUNTPOINT,SIZE,PARTTYPE,TYPE"],
+        text=True,
+    )
+    data = json.loads(raw)
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e), "service_enabled": service_enabled(), "drives": []}))
+    sys.exit(0)
+
+def walk(nodes, parent_skip=False):
+    for n in nodes or []:
+        typ = n.get("type") or ""
+        if typ in ("rom", "loop"):
+            continue
+        fst = (n.get("fstype") or "") or ""
+        uuid = (n.get("uuid") or "") or ""
+        mp = (n.get("mountpoint") or "") or ""
+        # Skip system trees
+        if mp in ("/", "/boot", "/home", "/.snapshots", "/var/log") or mp.startswith("/boot"):
+            walk(n.get("children"), True)
+            continue
+        if parent_skip:
+            walk(n.get("children"), True)
+            continue
+        if uuid and fst and ALLOW.match(fst):
+            parttype = (n.get("parttype") or "") or ""
+            size = int(n.get("size") or 0)
+            if fst == "vfat" and ("esp" in parttype.lower() or "efi" in parttype.lower()):
+                walk(n.get("children"), False)
+                continue
+            if fst == "vfat" and size < 536870912:
+                walk(n.get("children"), False)
+                continue
+            uuid_l = uuid.lower()
+            ignored = uuid_l in ign
+            auto_mp = auto.get(uuid_l, "")
+            mounted = bool(mp)
+            drives.append({
+                "name": n.get("name") or "",
+                "label": n.get("label") or "",
+                "uuid": uuid,
+                "fstype": fst,
+                "size": size,
+                "mountpoint": mp,
+                "automount_path": auto_mp,
+                "mounted": mounted,
+                "ignored": ignored,
+                "automounted": bool(auto_mp) and mp == auto_mp,
+                "fat_family": bool(FAT.match(fst)),
+            })
+        walk(n.get("children"), False)
+
+walk(data.get("blockdevices"))
+print(json.dumps({
+    "ok": True,
+    "service_enabled": service_enabled(),
+    "ignore_file": IGNORE,
+    "mount_root": MOUNT_ROOT,
+    "drives": drives,
+}))
+PY
+}
+
+cmd_status() {
+  local as_json=0
+  for a in "$@"; do
+    [ "$a" = "--json" ] && as_json=1
+  done
+  if [ "$as_json" -eq 1 ]; then
+    emit_status_json
+    return 0
+  fi
+  emit_status_json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print("service:", "enabled" if d.get("service_enabled") else "disabled")
+for x in d.get("drives") or []:
+    flags = []
+    if x.get("ignored"):
+        flags.append("ignored")
+    if x.get("mounted"):
+        flags.append("mounted")
+    if x.get("automounted"):
+        flags.append("automount")
+    label = x.get("label") or x.get("name")
+    mp = x.get("mountpoint") or x.get("automount_path") or "-"
+    flag_s = ",".join(flags) or "-"
+    print("%s\t%s\t%s\t%s\t%s" % (label, x.get("fstype"), mp, flag_s, x.get("uuid")))
+'
+}
+
+cmd_ignore() {
+  local uuid="${1:-}"
+  [[ -n "$uuid" ]] || { echo "usage: ignore <uuid>" >&2; exit 1; }
+  if [[ ${EUID:-0} -ne 0 ]]; then
+    exec sudo -n "$0" ignore "$uuid"
+  fi
+  ensure_ignore_file
+  if is_ignored "$uuid"; then
+    echo "already ignored: $uuid"
+  else
+    printf '%s\n' "$uuid" >> "$IGNORE_FILE"
+    echo "ignored: $uuid"
+  fi
+  run_automount
+}
+
+cmd_unignore() {
+  local uuid="${1:-}"
+  [[ -n "$uuid" ]] || { echo "usage: unignore <uuid>" >&2; exit 1; }
+  if [[ ${EUID:-0} -ne 0 ]]; then
+    exec sudo -n "$0" unignore "$uuid"
+  fi
+  ensure_ignore_file
+  if [ -f "$IGNORE_FILE" ]; then
+    local tmp
+    tmp=$(mktemp)
+    grep -viE "^[[:space:]]*${uuid}([[:space:]]|#|$)" "$IGNORE_FILE" > "$tmp" || true
+    install -m0644 "$tmp" "$IGNORE_FILE"
+    rm -f "$tmp"
+  fi
+  echo "unignored: $uuid"
+  run_automount
+}
+
+cmd_remount() {
+  run_automount
+}
+
+cmd_open() {
+  local path="${1:-}"
+  [[ -n "$path" ]] || { echo "usage: open <path>" >&2; exit 1; }
+  [[ -d "$path" ]] || { echo "not a directory: $path" >&2; exit 1; }
+  xdg-open "$path" >/dev/null 2>&1 || gio open "$path" >/dev/null 2>&1 || {
+    echo "could not open: $path" >&2
+    exit 1
+  }
+}
+
+case "${1:-}" in
+  status) shift; cmd_status "$@" ;;
+  remount) cmd_remount ;;
+  ignore) cmd_ignore "${2:-}" ;;
+  unignore) cmd_unignore "${2:-}" ;;
+  open) cmd_open "${2:-}" ;;
+  -h|--help|help|"") usage; [ -n "${1:-}" ] || exit 1 ;;
+  *) echo "unknown command: $1" >&2; usage; exit 1 ;;
+esac

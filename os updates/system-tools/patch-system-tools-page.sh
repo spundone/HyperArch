@@ -42,7 +42,7 @@ if [ -f "$PAGEREG" ]; then
     echo ":: menu entry already present"
   else
     cp -n "$PAGEREG" "$PAGEREG.pre-hyperwebster-system-tools" 2>/dev/null || true
-    perl -0pi -e 's/(\/\/ System\s*\n\s*\{\s*\n\s*label: qsTr\("Updates"\),)/\/\/ System\n        {\n            label: qsTr("System tools"),\n            icon: "settings",\n            description: qsTr("Account, display, input, kernel"),\n            category: "system"\n        },\n        {\n            label: qsTr("Updates"),/s' "$PAGEREG"
+    perl -0pi -e 's/(\/\/ System\s*\n\s*\{\s*\n\s*label: qsTr\("Updates"\),)/\/\/ System\n        {\n            label: qsTr("System tools"),\n            icon: "settings",\n            description: qsTr("Account, drives, display, input, kernel"),\n            category: "system"\n        },\n        {\n            label: qsTr("Updates"),/s' "$PAGEREG"
     if grep -q 'qsTr("System tools")' "$PAGEREG"; then
       echo ":: patched $PAGEREG (System tools menu entry)"
     else

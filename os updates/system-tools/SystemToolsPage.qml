@@ -14,7 +14,7 @@ import qs.utils
 import qs.modules.nexus
 import qs.modules.nexus.common
 
-// HyperWebster: Settings → System tools — account photo + hardware / kernel apps.
+// HyperWebster: Settings → System tools — account photo + hardware / kernel apps + drives.
 PageBase {
     id: root
 
@@ -25,18 +25,36 @@ PageBase {
     property bool faceReady: false
     property int faceEpoch: 0
     readonly property string avatarSource: (faceReady ? `file://${facePath}` : logoPath) + "?t=" + faceEpoch
+    property var drivesStatus: ({ ok: false, service_enabled: false, drives: [] })
 
     function refreshFace(): void {
-        faceEpoch++
+        faceEpoch++;
+    }
+
+    function refreshDrives(): void {
+        drivesProc.running = false;
+        drivesProc.running = true;
+    }
+
+    function driveStatusText(d): string {
+        if (d.ignored)
+            return qsTr("Ignored");
+        if (d.automounted)
+            return qsTr("Mounted · %1").arg(d.mountpoint || d.automount_path || "");
+        if (d.mounted)
+            return qsTr("Mounted · %1").arg(d.mountpoint || "");
+        if (d.automount_path)
+            return qsTr("Will mount · %1").arg(d.automount_path);
+        return qsTr("Not mounted");
     }
 
     function openTui(argv): void {
-        const cmd = ["kitty", "--class", "TUI.float", "-e"].concat(argv)
-        Quickshell.execDetached(cmd)
+        const cmd = ["kitty", "--class", "TUI.float", "-e"].concat(argv);
+        Quickshell.execDetached(cmd);
     }
 
     function openGui(bin): void {
-        Quickshell.execDetached(["sh", "-c", "command -v \"$1\" >/dev/null && exec \"$1\" || notify-send -u critical 'System tools' \"$1 is not installed\"", "sh", bin])
+        Quickshell.execDetached(["sh", "-c", "command -v \"$1\" >/dev/null && exec \"$1\" || notify-send -u critical 'System tools' \"$1 is not installed\"", "sh", bin]);
     }
 
     // Non-visual objects MUST live inside the layout. PageBase's default
@@ -48,6 +66,28 @@ PageBase {
         width: root.cappedWidth
         spacing: Tokens.spacing.extraSmall / 2
 
+        Process {
+            id: drivesProc
+
+            running: true
+            command: ["hyperwebster-drives", "status", "--json"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    try {
+                        root.drivesStatus = JSON.parse(text);
+                    } catch (e) {
+                        root.drivesStatus = ({ ok: false, service_enabled: false, drives: [] });
+                    }
+                }
+            }
+        }
+
+        Process {
+            id: drivesActionProc
+
+            onExited: root.refreshDrives()
+        }
+
         FileDialog {
             id: facePicker
 
@@ -56,11 +96,11 @@ PageBase {
             filters: Images.validImageExtensions
             onAccepted: path => {
                 if (CUtils.copyFile(Qt.resolvedUrl(path), Qt.resolvedUrl(`${Paths.home}/.face`))) {
-                    root.faceReady = true
-                    root.refreshFace()
-                    Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "low", "-h", `STRING:image-path:${path}`, qsTr("Profile picture changed"), qsTr("Lock screen and dashboard will use this photo.")])
+                    root.faceReady = true;
+                    root.refreshFace();
+                    Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "low", "-h", `STRING:image-path:${path}`, qsTr("Profile picture changed"), qsTr("Lock screen and dashboard will use this photo.")]);
                 } else {
-                    Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "critical", qsTr("Unable to change profile picture"), qsTr("Copy to ~/.face failed.")])
+                    Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "critical", qsTr("Unable to change profile picture"), qsTr("Copy to ~/.face failed.")]);
                 }
             }
         }
@@ -69,12 +109,12 @@ PageBase {
             path: root.facePath
             watchChanges: true
             onFileChanged: {
-                reload()
-                root.refreshFace()
+                reload();
+                root.refreshFace();
             }
             onLoaded: {
-                root.faceReady = true
-                root.refreshFace()
+                root.faceReady = true;
+                root.refreshFace();
             }
             onLoadFailed: root.faceReady = false
         }
@@ -173,11 +213,78 @@ PageBase {
             label: qsTr("Reset to Starman mark")
             status: faceReady ? qsTr("Removes custom photo") : qsTr("Already using Starman")
             onClicked: {
-                Quickshell.execDetached(["rm", "-f", root.facePath])
-                root.faceReady = false
-                root.refreshFace()
-                Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "low", qsTr("Profile picture reset"), qsTr("Lock screen will show the Starman mark.")])
+                Quickshell.execDetached(["rm", "-f", root.facePath]);
+                root.faceReady = false;
+                root.refreshFace();
+                Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "low", qsTr("Profile picture reset"), qsTr("Lock screen will show the Starman mark.")]);
             }
+        }
+
+        SectionHeader {
+            text: qsTr("Drives")
+        }
+
+        InfoRow {
+            first: true
+            label: qsTr("Secondary drive automount")
+            subtext: qsTr("Premount under /mnt/<label> before login · master switch in Additions")
+            value: root.drivesStatus.service_enabled ? qsTr("On") : qsTr("Off")
+        }
+
+        NavRow {
+            icon: "sync"
+            label: qsTr("Remount data drives now")
+            status: qsTr("Applies uid/gid for Steam on exFAT/NTFS")
+            last: !(root.drivesStatus.drives && root.drivesStatus.drives.length)
+            onClicked: {
+                drivesActionProc.command = ["hyperwebster-drives", "remount"];
+                drivesActionProc.running = true;
+                Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "low", qsTr("Drives"), qsTr("Remounting secondary disks...")]);
+            }
+        }
+
+        Repeater {
+            model: root.drivesStatus.drives || []
+
+            NavRow {
+                required property var modelData
+                required property int index
+
+                first: false
+                last: index === (root.drivesStatus.drives.length - 1)
+                icon: modelData.ignored ? "visibility_off" : "hard_drive"
+                label: {
+                    const name = (modelData.label && String(modelData.label).length) ? String(modelData.label) : (modelData.name || qsTr("Disk"));
+                    const fs = modelData.fstype ? (" · " + modelData.fstype) : "";
+                    return name + fs;
+                }
+                status: {
+                    let s = root.driveStatusText(modelData);
+                    if (modelData.fat_family)
+                        s += qsTr(" · no exFAT symlinks");
+                    return s;
+                }
+                onClicked: {
+                    if (modelData.ignored) {
+                        drivesActionProc.command = ["hyperwebster-drives", "unignore", modelData.uuid];
+                        drivesActionProc.running = true;
+                        Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "low", qsTr("Drives"), qsTr("Including in automount")]);
+                    } else {
+                        drivesActionProc.command = ["hyperwebster-drives", "ignore", modelData.uuid];
+                        drivesActionProc.running = true;
+                        Quickshell.execDetached(["notify-send", "-a", "caelestia-shell", "-u", "low", qsTr("Drives"), qsTr("Ignored for automount - tap again to include")]);
+                    }
+                }
+            }
+        }
+
+        StyledText {
+            Layout.fillWidth: true
+            Layout.topMargin: Tokens.spacing.extraSmall
+            wrapMode: Text.WordWrap
+            color: Colours.palette.m3outline
+            font: Tokens.font.label.small
+            text: qsTr("Tap a drive to ignore or include it in boot automount. Point Steam at /mnt/<label>/… after remount (not /run/media/…).")
         }
 
         SectionHeader {
@@ -216,14 +323,14 @@ PageBase {
             label: qsTr("Bluetooth")
             status: qsTr("Open Connected devices")
             onClicked: {
-                const pages = PageRegistry.pages
+                const pages = PageRegistry.pages;
                 for (let i = 0; i < pages.length; i++) {
                     if (pages[i].icon === "devices_other") {
-                        root.nState.currentPageIdx = i
-                        return
+                        root.nState.currentPageIdx = i;
+                        return;
                     }
                 }
-                root.openGui("blueman-manager")
+                root.openGui("blueman-manager");
             }
         }
 

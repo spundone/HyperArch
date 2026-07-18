@@ -37,7 +37,7 @@ See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware guidance and
 - **4K HDR TV profile** - `hyprmoncfg apply tv-gaming-4k` for 4K144 HDR VRR.
 - **Tailscale** preinstalled (`sudo tailscale up` to connect).
 - **Raycast-like launcher** - fuzzy search on Super+Space.
-- **Data drive automount** - non-system disks premount under `/mnt/<label>` at boot.
+- **Data drive automount** - non-system disks premount under `/mnt/<label>` before login (exFAT/NTFS owned by the desktop user for Steam); manage in Settings → System tools → Drives.
 - **Omarchy-style keybindings** - `Super+K` cheatsheet, `Super+Space` launcher,
   `Super+D` dashboard, `Super+Grave` workspace overview.
 - **Omarchy-inspired utilities** - `omarchy-send` LAN sharing (`Super+Ctrl+S`),

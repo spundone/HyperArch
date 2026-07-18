@@ -180,7 +180,7 @@
       "kind": "toggle",
       "category": "system",
       "name": "Secondary drive automount",
-      "desc": "Premount non-system disks under /mnt/<label> at boot",
+      "desc": "Premount non-system disks under /mnt/<label> at boot (Steam-ready uid on exFAT/NTFS)",
       "icon": "hard_drive",
       "check": "systemctl is-enabled hyperwebster-drive-automount.service >/dev/null 2>&1",
       "enable": "sudo sh \"$HOME/.local/share/hyperwebster/drive-automount/install-drive-automount.sh\"",
