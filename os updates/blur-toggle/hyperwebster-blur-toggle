@@ -68,7 +68,7 @@ set_layer_rules() {
 # Frosted glass for caelestia shell layers (Hyprland 0.55+ rule syntax).
 layerrule = blur on, match:namespace caelestia-.*
 layerrule = blur on, match:namespace qs-.*
-layerrule = ignorealpha 0.57, match:namespace caelestia-.*
+layerrule = ignore_alpha 0.57, match:namespace caelestia-.*
 # <<< hyperwebster-blur-toggle <<<
 EOF
   else
