@@ -1,0 +1,24 @@
+#!/bin/bash
+# hyperwebster-install-decky — Decky Loader (Game Mode Quick Access plugins).
+# Official upstream installer. Experimental on non-SteamOS / CachyOS sessions.
+set -euo pipefail
+
+echo "==> HyperWebster: Decky Loader (experimental)"
+echo "    Injects into Steam Game Mode (gamescope). Do not stack casually with Millennium."
+
+if [ -x "${HOME}/homebrew/services/PluginLoader" ]; then
+  echo "Decky PluginLoader already present at ~/homebrew/services/PluginLoader"
+  exit 0
+fi
+
+INSTALLER_URL=https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh
+echo "==> Running official Decky installer…"
+echo "    Source: $INSTALLER_URL"
+curl -fsSL "$INSTALLER_URL" | sh
+
+if [ -x "${HOME}/homebrew/services/PluginLoader" ]; then
+  echo "Decky installed. Enter Starman / gamescope and open the Quick Access menu (⋯)."
+else
+  echo "Installer finished — if PluginLoader is missing, re-run after fixing sudo/network." >&2
+  exit 1
+fi

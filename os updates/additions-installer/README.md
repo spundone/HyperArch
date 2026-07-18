@@ -12,6 +12,8 @@ installers/git only:
 | Item | Source |
 |------|--------|
 | DeckShift Gaming Mode | official git - `https://git.no-signal.uk/hyperwebster/deckshift.git` → `deckshift.sh` → **deckshift-login installer** (the one-shot-autologin fix, always run after deckshift.sh) |
+| Deckify / Chimera Gaming | CachyOS/Chimera gamescope Steam session helpers |
+| Heroic / Steam ROM Manager / Decky / Millennium | Official upstream installers via `nonsteam-gaming` (Non-Steam → gamescope) |
 | Spotify | `[omarchy]` pacman repo (proprietary - no upstream git exists) |
 | Once (Basecamp) | `[omarchy]` pacman repo (`once-bin`) |
 | Obsidian | Arch `[extra]` |

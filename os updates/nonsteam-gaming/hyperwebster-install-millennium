@@ -1,0 +1,37 @@
+#!/bin/bash
+# hyperwebster-install-millennium — Steam client themes/plugins (CSS/JS + Lua).
+# Official steambrew installer. Mods Steam, not the gamescope compositor.
+# Experimental alongside gamescope Game Mode; avoid stacking with Decky.
+set -euo pipefail
+
+echo "==> HyperWebster: Millennium (Steam Homebrew) — experimental"
+echo "    Themes/plugins for the Steam client (Lua backends supported)."
+echo "    Does not patch gamescope itself. Prefer not to run with Decky."
+
+millennium_present() {
+  [ -d "${HOME}/.millennium" ] && return 0
+  [ -e /usr/lib/millennium ] && return 0
+  [ -e /usr/lib32/millennium ] && return 0
+  command -v millennium >/dev/null 2>&1 && return 0
+  pacman -Q millennium >/dev/null 2>&1 && return 0
+  return 1
+}
+
+if millennium_present; then
+  echo "Millennium already appears installed."
+  exit 0
+fi
+
+if ! pacman -Q steam >/dev/null 2>&1 && ! command -v steam >/dev/null 2>&1; then
+  echo "Steam is required first (Additions → Steam or Deckify)." >&2
+  exit 1
+fi
+
+echo "==> Running official Millennium installer (https://steambrew.app/install.sh)…"
+curl -fsSL "https://steambrew.app/install.sh" | bash
+
+if millennium_present; then
+  echo "Millennium installed. Fully restart Steam (desktop or Starman) to load plugins."
+else
+  echo "Installer finished — verify at https://docs.steambrew.app/ if Steam does not show Millennium." >&2
+fi

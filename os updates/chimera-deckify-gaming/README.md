@@ -56,6 +56,12 @@ Hyprland on the next Starman boot.
 Do not put `gamescope-hdr.env` in `~/.config/environment.d/` globally - HDR
 WSI there applies to Hyprland too and can blank the desktop.
 
+## Non-Steam (Epic, emulators, Steam mods)
+
+Epic / GOG / Amazon and emulator ROMs show up in Game Mode as **Non-Steam**
+shortcuts. Use Additions → **Heroic**, **Steam ROM Manager**, optional
+**Decky** / **Millennium** - see [`nonsteam-gaming/README.md`](../nonsteam-gaming/README.md).
+
 ## HDR / VRR
 
 `gamescope-hdr.env` ships recommended env vars for amdgpu HDR/VRR on TV

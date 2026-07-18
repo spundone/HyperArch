@@ -1,0 +1,64 @@
+#!/bin/bash
+# hyperwebster-install-steam-rom-manager — SteamGridDB Steam ROM Manager AppImage.
+# Parses emulator libraries into Non-Steam shortcuts for gamescope SteamUI.
+set -euo pipefail
+
+BIN_DIR="${HOME}/.local/bin"
+TARGET="${BIN_DIR}/steam-rom-manager"
+WRAPPER="${BIN_DIR}/steam-rom-manager-bin"
+
+echo "==> HyperWebster: Steam ROM Manager"
+
+if command -v steam-rom-manager >/dev/null 2>&1 && [ -x "$TARGET" ]; then
+  echo "Steam ROM Manager already at $TARGET"
+  exit 0
+fi
+
+if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+  echo "Need curl + jq to resolve the latest SRM release." >&2
+  exit 1
+fi
+
+API=https://api.github.com/repos/SteamGridDB/steam-rom-manager/releases/latest
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "==> Resolving latest Steam ROM Manager AppImage…"
+URL=$(curl -fsSL "$API" | jq -r '
+  .assets[]
+  | select(.name | test("(?i)\\.AppImage$"))
+  | .browser_download_url
+' | head -1)
+
+if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+  echo "Could not find an AppImage on the latest SRM release." >&2
+  echo "Install manually from https://github.com/SteamGridDB/steam-rom-manager/releases" >&2
+  exit 1
+fi
+
+mkdir -p "$BIN_DIR"
+echo "==> Downloading $URL"
+curl -fL --progress-bar -o "$TARGET" "$URL"
+chmod +x "$TARGET"
+
+# Friendly name some launchers expect.
+ln -sfn "$TARGET" "$WRAPPER" 2>/dev/null || true
+
+# Desktop entry for Hyprland / launcher.
+APPDIR="${HOME}/.local/share/applications"
+mkdir -p "$APPDIR"
+cat > "$APPDIR/steam-rom-manager.desktop" <<EOF
+[Desktop Entry]
+Name=Steam ROM Manager
+Comment=Add emulator ROMs to Steam as Non-Steam shortcuts
+Exec=${TARGET}
+Icon=steam
+Terminal=false
+Type=Application
+Categories=Game;
+EOF
+
+echo
+echo "Steam ROM Manager installed → $TARGET"
+echo "Next: run it on the desktop, parse your emulator parsers, Preview → Parse →"
+echo "  Save to Steam. Restart Steam / enter Starman to see Non-Steam ROM tiles."

@@ -84,6 +84,7 @@ done
 [ -d "$SRC/starman-gaming-boot" ] && hw_cp "$SRC/starman-gaming-boot" "$DEST/"
 [ -d "$SRC/luks-tpm-unlock" ] && hw_cp "$SRC/luks-tpm-unlock" "$DEST/"
 [ -d "$SRC/chimera-deckify-gaming" ] && hw_cp "$SRC/chimera-deckify-gaming" "$DEST/"
+[ -d "$SRC/nonsteam-gaming" ] && hw_cp "$SRC/nonsteam-gaming" "$DEST/"
 [ -d "$SRC/cachyos-kernel-manager" ] && hw_cp "$SRC/cachyos-kernel-manager" "$DEST/"
 [ -d "$SRC/tv-gaming-display" ] && hw_cp "$SRC/tv-gaming-display" "$DEST/"
 [ -d "$SRC/launcher-raycast" ] && hw_cp "$SRC/launcher-raycast" "$DEST/"

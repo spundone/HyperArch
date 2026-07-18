@@ -1,0 +1,46 @@
+#!/bin/bash
+# hyperwebster-install-heroic — Epic / GOG / Amazon via Heroic (official .pacman).
+# Games appear in gamescope SteamUI after Heroic → Add to Steam (Non-Steam).
+set -euo pipefail
+
+echo "==> HyperWebster: Heroic Games Launcher"
+
+if command -v heroic >/dev/null 2>&1 || pacman -Q heroic-games-launcher-bin >/dev/null 2>&1 \
+  || pacman -Q heroic-games-launcher >/dev/null 2>&1; then
+  echo "Heroic already installed: $(command -v heroic 2>/dev/null || echo package)"
+  exit 0
+fi
+
+if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+  echo "Need curl + jq to resolve the latest Heroic release." >&2
+  exit 1
+fi
+
+API=https://api.github.com/repos/Heroic-Games-Launcher/HeroicGamesLauncher/releases/latest
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "==> Resolving latest Heroic .pacman from GitHub releases…"
+URL=$(curl -fsSL "$API" | jq -r '
+  .assets[]
+  | select(.name | test("(?i)linux.*\\.pacman$|\\.pacman$"))
+  | .browser_download_url
+' | head -1)
+
+if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+  echo "Could not find a .pacman asset on the latest Heroic release." >&2
+  echo "Install manually from https://heroicgameslauncher.com/downloads" >&2
+  exit 1
+fi
+
+PKG="$TMP/heroic.pacman"
+echo "==> Downloading $URL"
+curl -fL --progress-bar -o "$PKG" "$URL"
+echo "==> Installing with pacman -U…"
+sudo pacman -U --needed --noconfirm "$PKG"
+
+echo
+echo "Heroic installed."
+echo "Next: open Heroic on the desktop → log into Epic/GOG/Amazon →"
+echo "  Settings → Add games to Steam automatically  (or per-game Add to Steam)."
+echo "Those titles show under Non-Steam in Starman / gamescope SteamUI."

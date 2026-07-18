@@ -114,6 +114,46 @@
       "install": "sudo pacman -S --needed --noconfirm lutris"
     },
     {
+      "id": "heroic",
+      "kind": "install",
+      "category": "gaming",
+      "name": "Heroic (Epic / GOG / Amazon)",
+      "desc": "Install games → Add to Steam → play under Non-Steam in Starman",
+      "icon": "sports_esports",
+      "check": "command -v heroic >/dev/null 2>&1 || pacman -Q heroic-games-launcher-bin >/dev/null 2>&1 || pacman -Q heroic-games-launcher >/dev/null 2>&1",
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-heroic"
+    },
+    {
+      "id": "steam-rom-manager",
+      "kind": "install",
+      "category": "gaming",
+      "name": "Steam ROM Manager",
+      "desc": "Add emulator ROMs to Steam as Non-Steam shortcuts for gamescope",
+      "icon": "videogame_asset",
+      "check": "test -x \"$HOME/.local/bin/steam-rom-manager\" || command -v steam-rom-manager >/dev/null 2>&1",
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-steam-rom-manager"
+    },
+    {
+      "id": "decky",
+      "kind": "install",
+      "category": "gaming",
+      "name": "Decky Loader (experimental)",
+      "desc": "Game Mode Quick Access plugins — avoid stacking with Millennium",
+      "icon": "extension",
+      "check": "test -x \"$HOME/homebrew/services/PluginLoader\"",
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-decky"
+    },
+    {
+      "id": "millennium",
+      "kind": "install",
+      "category": "gaming",
+      "name": "Millennium (experimental)",
+      "desc": "Steam themes/plugins + Lua backends — mods Steam, not gamescope",
+      "icon": "palette",
+      "check": "test -d \"$HOME/.millennium\" || test -e /usr/lib/millennium || pacman -Q millennium >/dev/null 2>&1",
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-millennium"
+    },
+    {
       "id": "wine",
       "kind": "install",
       "category": "gaming",

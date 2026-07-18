@@ -55,6 +55,14 @@ them. Please support the originals; each remains under its own licence.
 - **[DeckShift](https://github.com/28allday/DeckShift)** - alternative desktop ↔
   gamescope session switching (opt-in post-install).
 - **gamescope** + **Steam** - gaming session compositor and store.
+- **[Heroic Games Launcher](https://heroicgameslauncher.com/)** - Epic / GOG /
+  Amazon → Non-Steam shortcuts for Game Mode.
+- **[Steam ROM Manager](https://github.com/SteamGridDB/steam-rom-manager)** -
+  emulator ROM → Steam library tiles (SteamGridDB).
+- **[Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)** -
+  optional Game Mode Quick Access plugins (experimental on HyperWebster).
+- **[Millennium](https://steambrew.app/)** - optional Steam client themes /
+  plugins including Lua backends (experimental; mods Steam, not gamescope).
 
 ## Hardware detection & tuning
 
