@@ -37,8 +37,8 @@ fi
 CONF="$ESP_PATH/limine.conf"
 MACHINE_ID=$(tr -d '[:space:]' </etc/machine-id 2>/dev/null || true)
 
-[ -f "$CONF" ] || { echo "no $CONF" >&2; exit 1; }
-[ -n "$MACHINE_ID" ] || { echo "no /etc/machine-id — aborting" >&2; exit 1; }
+[ -f "$CONF" ] || { echo "no $CONF — skipping (not a Limine install)"; exit 0; }
+[ -n "$MACHINE_ID" ] || { echo "no /etc/machine-id — skipping"; exit 0; }
 
 # Resolve UKI path: prefer CUSTOM_UKI_NAME, else first *_linux.efi on the ESP.
 UKI_REL="/EFI/Linux/${UKI_NAME}_linux.efi"
