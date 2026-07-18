@@ -14,70 +14,96 @@ BIN="$HOME/.local/bin"
 
 mkdir -p "$DEST" "$BIN"
 
+SRC_R=$(readlink -f "$SRC" 2>/dev/null || echo "$SRC")
+DEST_R=$(readlink -f "$DEST" 2>/dev/null || echo "$DEST")
+
+# Live layer checkout: SRC is already DEST — nothing to copy into itself.
+if [ "$SRC_R" = "$DEST_R" ]; then
+  echo "install-hyperwebster-update: layer already at $DEST — refreshing symlinks only"
+  chmod +x "$DEST/hyperwebster-update/bin/hyperwebster-update" \
+    "$DEST/hyperwebster-update/bin/pull-layer.sh" \
+    "$DEST/hyperwebster-update/migrations/"*.sh 2>/dev/null || true
+  ln -sf "$DEST/hyperwebster-update/bin/hyperwebster-update" "$BIN/hyperwebster-update"
+  ln -sf "$DEST/hyperwebster-update/bin/pull-layer.sh" "$BIN/hyperwebster-layer-pull"
+  echo "Installed HyperWebster update system -> $DEST"
+  echo "  hyperwebster-update                              # snapshot + package upgrade + layer"
+  exit 0
+fi
+
 # Component sources the migrations re-apply. Extend this list as changes are added.
+hw_cp() {
+  # hw_cp SRC DEST — skip when same inode/path
+  [ -e "$1" ] || return 0
+  _s=$(readlink -f "$1" 2>/dev/null || echo "$1")
+  _d=
+  [ -e "$2" ] && _d=$(readlink -f "$2" 2>/dev/null || echo "$2")
+  [ -n "$_d" ] && [ "$_s" = "$_d" ] && return 0
+  cp -a "$1" "$2"
+}
+
 COMPONENTS="install-keybinds-help.sh hyperwebster-keybinds hyperwebster-keybinds-gen hyprland-keybinds-help.conf HyperWebster-keybindings.md"
 for c in $COMPONENTS; do
-  [ -e "$SRC/$c" ] && cp -a "$SRC/$c" "$DEST/"
+  [ -e "$SRC/$c" ] && hw_cp "$SRC/$c" "$DEST/"
 done
-[ -d "$SRC/fish-to-bash" ] && cp -a "$SRC/fish-to-bash" "$DEST/"
-[ -d "$SRC/software-install" ] && cp -a "$SRC/software-install" "$DEST/"
-[ -d "$SRC/omarchy-keys" ] && cp -a "$SRC/omarchy-keys" "$DEST/"
-[ -d "$SRC/omarchy-extras" ] && cp -a "$SRC/omarchy-extras" "$DEST/"
-[ -d "$SRC/omarchy-launcher" ] && cp -a "$SRC/omarchy-launcher" "$DEST/"
-[ -d "$SRC/omadots-extras" ] && cp -a "$SRC/omadots-extras" "$DEST/"
-[ -d "$SRC/monitor-control" ] && cp -a "$SRC/monitor-control" "$DEST/"
-[ -d "$SRC/updates-panel" ] && cp -a "$SRC/updates-panel" "$DEST/"
-[ -d "$SRC/system-polish" ] && cp -a "$SRC/system-polish" "$DEST/"
-[ -d "$SRC/super-clipboard" ] && cp -a "$SRC/super-clipboard" "$DEST/"
-[ -d "$SRC/screenshots" ] && cp -a "$SRC/screenshots" "$DEST/"
-[ -d "$SRC/monitor-control-fix" ] && cp -a "$SRC/monitor-control-fix" "$DEST/"
-[ -d "$SRC/launcher-fix" ] && cp -a "$SRC/launcher-fix" "$DEST/"
-[ -d "$SRC/dashboard-key" ] && cp -a "$SRC/dashboard-key" "$DEST/"
-[ -d "$SRC/gaming-enablement" ] && cp -a "$SRC/gaming-enablement" "$DEST/"
-[ -d "$SRC/display-manager-sddm" ] && cp -a "$SRC/display-manager-sddm" "$DEST/"
-[ -d "$SRC/deckshift-login" ] && cp -a "$SRC/deckshift-login" "$DEST/"
-[ -d "$SRC/sddm-theme" ] && cp -a "$SRC/sddm-theme" "$DEST/"
-[ -d "$SRC/wifi-password-retry" ] && cp -a "$SRC/wifi-password-retry" "$DEST/"
-[ -d "$SRC/monitor-hotload" ] && cp -a "$SRC/monitor-hotload" "$DEST/"
-[ -d "$SRC/update-prompts-fix" ] && cp -a "$SRC/update-prompts-fix" "$DEST/"
-[ -d "$SRC/cheatsheet-tidy" ] && cp -a "$SRC/cheatsheet-tidy" "$DEST/"
-[ -d "$SRC/cliamp-music" ] && cp -a "$SRC/cliamp-music" "$DEST/"
-[ -d "$SRC/additions-installer" ] && cp -a "$SRC/additions-installer" "$DEST/"
-[ -d "$SRC/menu-cleanup" ] && cp -a "$SRC/menu-cleanup" "$DEST/"
+[ -d "$SRC/fish-to-bash" ] && hw_cp "$SRC/fish-to-bash" "$DEST/"
+[ -d "$SRC/software-install" ] && hw_cp "$SRC/software-install" "$DEST/"
+[ -d "$SRC/omarchy-keys" ] && hw_cp "$SRC/omarchy-keys" "$DEST/"
+[ -d "$SRC/omarchy-extras" ] && hw_cp "$SRC/omarchy-extras" "$DEST/"
+[ -d "$SRC/omarchy-launcher" ] && hw_cp "$SRC/omarchy-launcher" "$DEST/"
+[ -d "$SRC/omadots-extras" ] && hw_cp "$SRC/omadots-extras" "$DEST/"
+[ -d "$SRC/monitor-control" ] && hw_cp "$SRC/monitor-control" "$DEST/"
+[ -d "$SRC/updates-panel" ] && hw_cp "$SRC/updates-panel" "$DEST/"
+[ -d "$SRC/system-polish" ] && hw_cp "$SRC/system-polish" "$DEST/"
+[ -d "$SRC/super-clipboard" ] && hw_cp "$SRC/super-clipboard" "$DEST/"
+[ -d "$SRC/screenshots" ] && hw_cp "$SRC/screenshots" "$DEST/"
+[ -d "$SRC/monitor-control-fix" ] && hw_cp "$SRC/monitor-control-fix" "$DEST/"
+[ -d "$SRC/launcher-fix" ] && hw_cp "$SRC/launcher-fix" "$DEST/"
+[ -d "$SRC/dashboard-key" ] && hw_cp "$SRC/dashboard-key" "$DEST/"
+[ -d "$SRC/gaming-enablement" ] && hw_cp "$SRC/gaming-enablement" "$DEST/"
+[ -d "$SRC/display-manager-sddm" ] && hw_cp "$SRC/display-manager-sddm" "$DEST/"
+[ -d "$SRC/deckshift-login" ] && hw_cp "$SRC/deckshift-login" "$DEST/"
+[ -d "$SRC/sddm-theme" ] && hw_cp "$SRC/sddm-theme" "$DEST/"
+[ -d "$SRC/wifi-password-retry" ] && hw_cp "$SRC/wifi-password-retry" "$DEST/"
+[ -d "$SRC/monitor-hotload" ] && hw_cp "$SRC/monitor-hotload" "$DEST/"
+[ -d "$SRC/update-prompts-fix" ] && hw_cp "$SRC/update-prompts-fix" "$DEST/"
+[ -d "$SRC/cheatsheet-tidy" ] && hw_cp "$SRC/cheatsheet-tidy" "$DEST/"
+[ -d "$SRC/cliamp-music" ] && hw_cp "$SRC/cliamp-music" "$DEST/"
+[ -d "$SRC/additions-installer" ] && hw_cp "$SRC/additions-installer" "$DEST/"
+[ -d "$SRC/menu-cleanup" ] && hw_cp "$SRC/menu-cleanup" "$DEST/"
 # Display, boot, and theming fixes
-[ -d "$SRC/xdg-terminal-exec-handler" ] && cp -a "$SRC/xdg-terminal-exec-handler" "$DEST/"
-[ -d "$SRC/caelestia-lock-faillock" ] && cp -a "$SRC/caelestia-lock-faillock" "$DEST/"
-[ -d "$SRC/limine-uki-dead-entry" ] && cp -a "$SRC/limine-uki-dead-entry" "$DEST/"
-[ -d "$SRC/kernel-reboot-notify" ] && cp -a "$SRC/kernel-reboot-notify" "$DEST/"
-[ -d "$SRC/app-theme-awareness" ] && cp -a "$SRC/app-theme-awareness" "$DEST/"
-[ -d "$SRC/cheatsheet-keymap-path" ] && cp -a "$SRC/cheatsheet-keymap-path" "$DEST/"
-[ -d "$SRC/additions-extra" ] && cp -a "$SRC/additions-extra" "$DEST/"
-[ -d "$SRC/base-default-packages" ] && cp -a "$SRC/base-default-packages" "$DEST/"
+[ -d "$SRC/xdg-terminal-exec-handler" ] && hw_cp "$SRC/xdg-terminal-exec-handler" "$DEST/"
+[ -d "$SRC/caelestia-lock-faillock" ] && hw_cp "$SRC/caelestia-lock-faillock" "$DEST/"
+[ -d "$SRC/limine-uki-dead-entry" ] && hw_cp "$SRC/limine-uki-dead-entry" "$DEST/"
+[ -d "$SRC/kernel-reboot-notify" ] && hw_cp "$SRC/kernel-reboot-notify" "$DEST/"
+[ -d "$SRC/app-theme-awareness" ] && hw_cp "$SRC/app-theme-awareness" "$DEST/"
+[ -d "$SRC/cheatsheet-keymap-path" ] && hw_cp "$SRC/cheatsheet-keymap-path" "$DEST/"
+[ -d "$SRC/additions-extra" ] && hw_cp "$SRC/additions-extra" "$DEST/"
+[ -d "$SRC/base-default-packages" ] && hw_cp "$SRC/base-default-packages" "$DEST/"
 # Passwordless sudo toggle
-[ -d "$SRC/sudo-timed-nopasswd" ] && cp -a "$SRC/sudo-timed-nopasswd" "$DEST/"
-[ -d "$SRC/starman-gaming-boot" ] && cp -a "$SRC/starman-gaming-boot" "$DEST/"
-[ -d "$SRC/luks-tpm-unlock" ] && cp -a "$SRC/luks-tpm-unlock" "$DEST/"
-[ -d "$SRC/chimera-deckify-gaming" ] && cp -a "$SRC/chimera-deckify-gaming" "$DEST/"
-[ -d "$SRC/cachyos-kernel-manager" ] && cp -a "$SRC/cachyos-kernel-manager" "$DEST/"
-[ -d "$SRC/tv-gaming-display" ] && cp -a "$SRC/tv-gaming-display" "$DEST/"
-[ -d "$SRC/launcher-raycast" ] && cp -a "$SRC/launcher-raycast" "$DEST/"
-[ -d "$SRC/blur-toggle" ] && cp -a "$SRC/blur-toggle" "$DEST/"
-[ -d "$SRC/appearance-toggles" ] && cp -a "$SRC/appearance-toggles" "$DEST/"
-[ -d "$SRC/cachyos-repo-switch" ] && cp -a "$SRC/cachyos-repo-switch" "$DEST/"
-[ -d "$SRC/theme-polish" ] && cp -a "$SRC/theme-polish" "$DEST/"
-[ -d "$SRC/drive-automount" ] && cp -a "$SRC/drive-automount" "$DEST/"
-[ -d "$SRC/gamemode-toggle-deckshift" ] && cp -a "$SRC/gamemode-toggle-deckshift" "$DEST/"
-[ -d "$SRC/iphone-tether" ] && cp -a "$SRC/iphone-tether" "$DEST/"
-[ -d "$SRC/notif-clear-fix" ] && cp -a "$SRC/notif-clear-fix" "$DEST/"
-[ -d "$SRC/btrfs-snapshot-manager" ] && cp -a "$SRC/btrfs-snapshot-manager" "$DEST/"
-[ -d "$SRC/hypersmooth-display" ] && cp -a "$SRC/hypersmooth-display" "$DEST/"
-[ -d "$SRC/zephyr-polish" ] && cp -a "$SRC/zephyr-polish" "$DEST/"
-[ -d "$SRC/distro-tools" ] && cp -a "$SRC/distro-tools" "$DEST/"
-[ -d "$SRC/shell-branding" ] && cp -a "$SRC/shell-branding" "$DEST/"
-[ -d "$SRC/update-alias" ] && cp -a "$SRC/update-alias" "$DEST/"
+[ -d "$SRC/sudo-timed-nopasswd" ] && hw_cp "$SRC/sudo-timed-nopasswd" "$DEST/"
+[ -d "$SRC/starman-gaming-boot" ] && hw_cp "$SRC/starman-gaming-boot" "$DEST/"
+[ -d "$SRC/luks-tpm-unlock" ] && hw_cp "$SRC/luks-tpm-unlock" "$DEST/"
+[ -d "$SRC/chimera-deckify-gaming" ] && hw_cp "$SRC/chimera-deckify-gaming" "$DEST/"
+[ -d "$SRC/cachyos-kernel-manager" ] && hw_cp "$SRC/cachyos-kernel-manager" "$DEST/"
+[ -d "$SRC/tv-gaming-display" ] && hw_cp "$SRC/tv-gaming-display" "$DEST/"
+[ -d "$SRC/launcher-raycast" ] && hw_cp "$SRC/launcher-raycast" "$DEST/"
+[ -d "$SRC/blur-toggle" ] && hw_cp "$SRC/blur-toggle" "$DEST/"
+[ -d "$SRC/appearance-toggles" ] && hw_cp "$SRC/appearance-toggles" "$DEST/"
+[ -d "$SRC/cachyos-repo-switch" ] && hw_cp "$SRC/cachyos-repo-switch" "$DEST/"
+[ -d "$SRC/theme-polish" ] && hw_cp "$SRC/theme-polish" "$DEST/"
+[ -d "$SRC/drive-automount" ] && hw_cp "$SRC/drive-automount" "$DEST/"
+[ -d "$SRC/gamemode-toggle-deckshift" ] && hw_cp "$SRC/gamemode-toggle-deckshift" "$DEST/"
+[ -d "$SRC/iphone-tether" ] && hw_cp "$SRC/iphone-tether" "$DEST/"
+[ -d "$SRC/notif-clear-fix" ] && hw_cp "$SRC/notif-clear-fix" "$DEST/"
+[ -d "$SRC/btrfs-snapshot-manager" ] && hw_cp "$SRC/btrfs-snapshot-manager" "$DEST/"
+[ -d "$SRC/hypersmooth-display" ] && hw_cp "$SRC/hypersmooth-display" "$DEST/"
+[ -d "$SRC/zephyr-polish" ] && hw_cp "$SRC/zephyr-polish" "$DEST/"
+[ -d "$SRC/distro-tools" ] && hw_cp "$SRC/distro-tools" "$DEST/"
+[ -d "$SRC/shell-branding" ] && hw_cp "$SRC/shell-branding" "$DEST/"
+[ -d "$SRC/update-alias" ] && hw_cp "$SRC/update-alias" "$DEST/"
 
 # The update system itself.
-cp -a "$SRC/hyperwebster-update" "$DEST/"
+hw_cp "$SRC/hyperwebster-update" "$DEST/"
 chmod +x "$DEST/hyperwebster-update/bin/hyperwebster-update" \
   "$DEST/hyperwebster-update/bin/pull-layer.sh" \
   "$DEST/hyperwebster-update/migrations/"*.sh

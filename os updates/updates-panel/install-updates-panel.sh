@@ -14,11 +14,31 @@ BIN="$HOME/.local/bin"
 SHARE="$HOME/.local/share/hyperwebster/updates-panel"
 UNITS="$HOME/.config/systemd/user"
 
+# Live layer: SRC is often already SHARE — never install a file onto itself.
+if [ -f "$SRC/../hyperwebster-update/lib/hw-install-file.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$SRC/../hyperwebster-update/lib/hw-install-file.sh"
+else
+  hw_install_file() {
+    _s=$1; _d=$2; _m=${3:-0644}
+    [ -f "$_s" ] || return 0
+    _sr=$(readlink -f "$_s" 2>/dev/null || echo "$_s")
+    _dr=
+    [ -e "$_d" ] && _dr=$(readlink -f "$_d" 2>/dev/null || echo "$_d")
+    if [ -n "$_dr" ] && [ "$_sr" = "$_dr" ]; then
+      chmod "$_m" "$_d" 2>/dev/null || true
+      return 0
+    fi
+    mkdir -p "$(dirname -- "$_d")"
+    install -m "$_m" "$_s" "$_d"
+  }
+fi
+
 # 1. Status checker + user timer.
 mkdir -p "$BIN" "$UNITS" "$SHARE"
-install -m 0755 "$SRC/hyperwebster-update-check" "$BIN/hyperwebster-update-check"
-install -m 0644 "$SRC/hyperwebster-update-check.service" "$UNITS/"
-install -m 0644 "$SRC/hyperwebster-update-check.timer" "$UNITS/"
+hw_install_file "$SRC/hyperwebster-update-check" "$BIN/hyperwebster-update-check" 0755
+hw_install_file "$SRC/hyperwebster-update-check.service" "$UNITS/hyperwebster-update-check.service" 0644
+hw_install_file "$SRC/hyperwebster-update-check.timer" "$UNITS/hyperwebster-update-check.timer" 0644
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   systemctl --user daemon-reload
   systemctl --user enable --now hyperwebster-update-check.timer 2>/dev/null \
@@ -32,8 +52,8 @@ fi
 command -v checkupdates >/dev/null 2>&1 || sudo pacman -S --needed --noconfirm pacman-contrib
 
 # 3. Stable on-system copy of the patch (the pacman hook points here).
-install -m 0644 "$SRC/UpdatesPage.qml" "$SHARE/UpdatesPage.qml"
-install -m 0755 "$SRC/patch-updates-page.sh" "$SHARE/patch-updates-page.sh"
+hw_install_file "$SRC/UpdatesPage.qml" "$SHARE/UpdatesPage.qml" 0644
+hw_install_file "$SRC/patch-updates-page.sh" "$SHARE/patch-updates-page.sh" 0755
 
 # 4. Apply the QML patch now.
 sudo sh "$SHARE/patch-updates-page.sh"

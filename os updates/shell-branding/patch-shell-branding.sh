@@ -62,7 +62,8 @@ if [ -n "$SHELL_ROOT" ] && [ -d "$SHELL_ROOT" ]; then
 else
   NEXUS_MODULES="$NEXUS/modules/nexus"
   PKG=""
-  ASSETS="$NEXUS/../assets"
+  # shellDir + "/assets/…" → /etc/xdg/quickshell/caelestia/assets
+  ASSETS="$NEXUS/assets"
 fi
 
 for f in \
@@ -97,13 +98,22 @@ if [ -n "$PKG" ] && [ -f "$PKG" ]; then
   fi
 fi
 
-# About page logo: reuse Starman Plymouth art when vendored, else keep nosignal asset renamed.
+# About page logo: Starman mark (always overwrite — never leave a renamed NoSignal copy).
 if [ -d "$ASSETS" ]; then
   if [ -f "$SELF_DIR/hyperwebster-logo.png" ]; then
     install -m 0644 "$SELF_DIR/hyperwebster-logo.png" "$ASSETS/hyperwebster-logo.png"
+    echo "shell-branding: installed About logo -> $ASSETS/hyperwebster-logo.png"
   elif [ -f "$ASSETS/nosignal-logo.png" ] && [ ! -f "$ASSETS/hyperwebster-logo.png" ]; then
     cp -n "$ASSETS/nosignal-logo.png" "$ASSETS/hyperwebster-logo.png"
+    echo "shell-branding: WARNING: no Starman logo vendored; copied nosignal-logo as placeholder"
   fi
+fi
+
+# Ensure AboutPage still points at hyperwebster-logo.png even if text was already rebranded.
+ABOUT="$NEXUS_MODULES/pages/AboutPage.qml"
+if [ -f "$ABOUT" ] && grep -q 'nosignal-logo\.png' "$ABOUT" 2>/dev/null; then
+  sed -i -e 's|nosignal-logo\.png|hyperwebster-logo.png|g' "$ABOUT"
+  echo "shell-branding: retargeted AboutPage logo path"
 fi
 
 echo "shell-branding: patched $(basename "${SHELL_ROOT:-$NEXUS}")"
