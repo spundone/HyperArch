@@ -44,6 +44,7 @@ macOS:
   - OrbStack (recommended): https://orbstack.dev/
   - or Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/
   Then: ./build.sh
+  Apple Silicon uses linux/amd64 Arch under emulation (expected; slower).
 
 Windows:
   - WSL2 (Ubuntu) + Docker Desktop WSL integration, or Docker Engine in WSL

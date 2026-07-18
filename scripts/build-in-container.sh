@@ -8,6 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE_NAME="${HYPERWEBSTER_BUILD_IMAGE:-hyperwebster-builder:latest}"
 DOCKERFILE="$SCRIPT_DIR/docker/Dockerfile"
+# Official archlinux image is x86_64-only (ISO is amd64). Apple Silicon needs this.
+PLATFORM="${HYPERWEBSTER_BUILD_PLATFORM:-linux/amd64}"
 
 container_runtime() {
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -41,9 +43,12 @@ elif [ "$(uname -s)" = Darwin ]; then
   fi
 fi
 
-echo "==> Host: $HOST_HINT · runtime: $RUNTIME"
+echo "==> Host: $HOST_HINT · runtime: $RUNTIME · platform: $PLATFORM"
+if [ "$(uname -m)" = arm64 ] || [ "$(uname -m)" = aarch64 ]; then
+  echo "==> Apple Silicon / ARM host: building amd64 Arch under emulation (slower)."
+fi
 echo "==> Building image $IMAGE_NAME (if needed)..."
-"$RUNTIME" build -t "$IMAGE_NAME" -f "$DOCKERFILE" "$SCRIPT_DIR/docker"
+"$RUNTIME" build --platform "$PLATFORM" -t "$IMAGE_NAME" -f "$DOCKERFILE" "$SCRIPT_DIR/docker"
 
 hyperwebster_ensure_stock_iso "$SCRIPT_DIR" >/dev/null
 
@@ -55,6 +60,7 @@ BUILD_USER="$(id -un)"
 # OrbStack, Docker Desktop (macOS/Windows), and Linux.
 CONTAINER_ARGS=(
   run --rm
+  --platform "$PLATFORM"
   --privileged
   --cap-add SYS_ADMIN
   --security-opt seccomp=unconfined

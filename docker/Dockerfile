@@ -1,8 +1,17 @@
 # Arch Linux image with HyperWebster OS ISO-builder dependencies.
 # Used by scripts/build-in-container.sh (./build.sh on macOS / WSL / non-Arch).
-FROM archlinux:latest
+#
+# Force linux/amd64: the official archlinux image is x86_64-only. Apple Silicon
+# (OrbStack / Docker Desktop) runs it under qemu/Rosetta emulation.
+FROM --platform=linux/amd64 archlinux:latest
 
-RUN pacman -Syu --noconfirm \
+# pacman 7's DownloadUser/sandbox fails under qemu-user ("switching to sandbox
+# user 'alpm' failed"). Disable for image build; the build chroot is separate.
+RUN sed -i 's/^DownloadUser/#DownloadUser/' /etc/pacman.conf \
+    && printf '\n# HyperWebster container build (qemu-safe)\nDisableSandbox\n' >> /etc/pacman.conf \
+    && pacman-key --init \
+    && pacman-key --populate archlinux \
+    && pacman -Syu --noconfirm \
     && pacman -S --noconfirm --needed \
         base-devel \
         git \

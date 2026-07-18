@@ -2,12 +2,14 @@
   "name": "HyperWebster OS ISO Builder",
   "build": {
     "dockerfile": "../docker/Dockerfile",
-    "context": ".."
+    "context": "..",
+    "options": ["--platform", "linux/amd64"]
   },
   "workspaceFolder": "/build",
   "workspaceMount": "source=${localWorkspaceFolder},target=/build,type=bind",
   "remoteUser": "root",
   "runArgs": [
+    "--platform=linux/amd64",
     "--privileged",
     "--cap-add=SYS_ADMIN",
     "--security-opt=seccomp=unconfined"
