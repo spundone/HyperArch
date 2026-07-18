@@ -63,11 +63,11 @@ Edit the keymap here and the help updates itself.
 
 | Keys | Action |
 |------|--------|
-| `Super+1`…`9`,`0` | Go to workspace 1-10 |
+| `Super+1-9,0` | Go to workspace 1-10 |
 | `Super+Tab` | Next workspace (Omarchy key) |
 | `Super+Shift+Tab` | Previous workspace (Omarchy key) |
 | `Super+Ctrl+Tab` | Back to former workspace (Omarchy key) |
-| `Ctrl+Super+1`…`9`,`0` | Go to workspace **group** 1-10 |
+| `Ctrl+Super+1-9,0` | Go to workspace **group** 1-10 |
 | `Ctrl+Super+Left` / `Right` | Previous / next workspace |
 | `Super+Page_Up` / `Page_Down` | Previous / next workspace |
 | `Super` + scroll up/down | Next / previous workspace |
@@ -78,12 +78,12 @@ Edit the keymap here and the help updates itself.
 
 | Keys | Action |
 |------|--------|
-| `Super+Shift+1`…`9`,`0` | Move window to workspace 1-10 (Omarchy key) |
-| `Super+Alt+1`…`9`,`0` | Move window to workspace 1-10 (alias, old key) |
-| `Ctrl+Super+Alt+1`…`9`,`0` | Move window to workspace **group** 1-10 |
+| `Super+Shift+1-9,0` | Move window to workspace 1-10 (Omarchy key) |
+| `Super+Alt+1-9,0` | Move window to workspace 1-10 (alias, old key) |
+| `Ctrl+Super+Alt+1-9,0` | Move window to workspace **group** 1-10 |
 | `Super+Alt+Page_Up` / `Page_Down` | Move window to workspace ±1 |
 | `Super+Alt` + scroll up/down | Move window to workspace ±1 |
-| `Ctrl+Super+Shift+Right` / `Left` | Move window to workspace +1 / −1 |
+| `Ctrl+Super+Shift+Right` / `Left` | Move window to workspace +1 / -1 |
 | `Ctrl+Super+Shift+Up` | Move window to special workspace |
 | `Ctrl+Super+Shift+Down` | Move window to first empty workspace |
 | `Super+Alt+S` | Move window to special workspace |
@@ -92,12 +92,12 @@ Edit the keymap here and the help updates itself.
 
 | Keys | Action |
 |------|--------|
-| `Super+←/→/↑/↓` | Move focus left/right/up/down |
+| `Super+Left/Right/Up/Down` | Move focus left/right/up/down |
 | `Alt+Tab` / `Shift+Alt+Tab` | Cycle focus next / previous window (Omarchy key) |
-| `Super+Shift+←/→/↑/↓` | Move window in that direction |
-| `Super+Minus` / `Super+Equal` | Resize narrower / wider (−/+10% width) |
-| `Super+Shift+Minus` / `Equal` | Resize shorter / taller (−/+10% height) |
-| `Super+Alt+←/→/↑/↓` | Resize active window |
+| `Super+Shift+Left/Right/Up/Down` | Move window in that direction |
+| `Super+Minus` / `Super+Equal` | Resize narrower / wider (-/+10% width) |
+| `Super+Shift+Minus` / `Equal` | Resize shorter / taller (-/+10% height) |
+| `Super+Alt+Left/Right/Up/Down` | Resize active window |
 | `Super` + left-drag | Move window (mouse) |
 | `Super+Z` + drag | Move window (mouse) |
 | `Super` + right-drag | Resize window (mouse) |

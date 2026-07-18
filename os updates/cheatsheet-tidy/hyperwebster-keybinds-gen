@@ -21,8 +21,7 @@ set -eu
 
 MD="${1:-${HYPERWEBSTER_KEYMAP_MD:-}}"
 if [ -z "$MD" ]; then
-  for cand in "$HOME/Downloads/HyperWebster-keybindings.md" \
-              "$HOME/.local/share/hyperwebster/HyperWebster-keybindings.md"; do
+  for cand in "$HOME/.local/share/hyperwebster/HyperWebster-keybindings.md"; do
     [ -f "$cand" ] && { MD="$cand"; break; }
   done
 fi
@@ -71,12 +70,25 @@ insrc { next }
   if (length(keys) > wk) wk = length(keys)
 }
 
+# ASCII-safe key labels for fuzzel (Material/icon fonts often lack … ←→↑↓).
+function ascii_keys(s) {
+  gsub(/…/, "-", s)
+  gsub(/←/, "Left", s)
+  gsub(/→/, "Right", s)
+  gsub(/↑/, "Up", s)
+  gsub(/↓/, "Down", s)
+  gsub(/−/, "-", s)
+  return s
+}
+
 END {
   budget = cols - wk - 2                        # action space after the key column
   for (i = 1; i <= r; i++) {
+    k = ascii_keys(KEY[i])
     d = DSC[i]
-    if (length(d) > budget) d = substr(d, 1, budget - 1) "…"
-    printf "%-*s  %s\n", wk, KEY[i], d
+    gsub(/−/, "-", d)
+    if (length(d) > budget) d = substr(d, 1, budget - 1) "..."
+    printf "%-*s  %s\n", wk, k, d
   }
 }
 ' "$MD"

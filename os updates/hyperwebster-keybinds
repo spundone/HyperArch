@@ -31,12 +31,15 @@ fi
 
 if [ ! -s "$LIST" ]; then
   command -v notify-send >/dev/null 2>&1 &&
-    notify-send -u critical "HyperWebster keys" "Cheatsheet unavailable — keymap markdown not found."
+    notify-send -u critical "HyperWebster keys" "Cheatsheet unavailable - keymap markdown not found."
   exit 1
 fi
 
+# Monospace first: Material Symbols / UI fonts as primary remapped digits and
+# arrows into garbage glyphs in the cheatsheet.
 selection=$(fuzzel --dmenu \
   --prompt "keys> " \
+  --font "JetBrainsMono Nerd Font:size=13,CaskaydiaCove Nerd Font:size=13,Noto Sans Mono:size=13" \
   --width 100 \
   --lines 20 \
   --no-icons < "$LIST" 2>/dev/null)
