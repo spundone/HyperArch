@@ -461,27 +461,26 @@ tcecho() { printf '%s%s%s%s\n' "$(hw_pad "${#1}")" "${2:-}" "$1" "${3:-}" >/dev/
 cread()   { printf '%s' "$(hw_pad "${#2}")" >/dev/tty; read -rp  "$2" "$1" </dev/tty; }
 csecret() { printf '%s' "$(hw_pad "${#2}")" >/dev/tty; read -rsp "$2" "$1" </dev/tty; echo; }
 
-# Starman logo lines (same art as assets/branding/starman-installer.txt).
+# Compact Starman mark (fixed width, left-padded inside the block so no stray
+# glyphs hug the screen edge). Keep LOGO_WIDTH <= ~40 so 80x25 and TV fonts fit
+# without wrap. Do NOT feed this through `gum style` — gum strips trailing
+# spaces and left-aligns each line, which shreds ASCII art.
 STARMAN_LINES=(
-  '                                                 .     '
-  '                                                       '
-  '                                                       '
-  'oo                                                     '
-  'o.                      ........                       '
-  '                   ...  ..  .....o.                    '
-  '                 ..              ....                  '
-  '               ..           ..oo.   ......             '
-  '               ..     ..     o88o.   .....             '
-  '               . .   ...  .  .888o.  ... .             '
-  '               .     ...             ......            '
-  '               ..    ...             .... .            '
+  '          .          '
+  '         ...         '
+  '     ..  ...  ..     '
+  '    .oo.......oo.    '
+  '    .o88o...o88o.    '
+  '     .888o.o888.     '
+  '      ..o888o..      '
+  '        .....        '
+  '         ...         '
+  '          .          '
 )
-LOGO_WIDTH=0
+LOGO_WIDTH=20
 for _hw_l in "${STARMAN_LINES[@]}"; do
   [ "${#_hw_l}" -gt "$LOGO_WIDTH" ] && LOGO_WIDTH=${#_hw_l}
 done
-PADDING_LEFT=$(( ( $(hw_cols) - LOGO_WIDTH ) / 2 ))
-[ "$PADDING_LEFT" -lt 0 ] && PADDING_LEFT=0
 
 # Tokyo Night gum theme (matches Omarchy presentation.sh).
 hw_gum_theme() {
@@ -495,8 +494,13 @@ hw_gum_theme() {
   export GUM_CHOOSE_CURSOR_FOREGROUND=2
   export GUM_CHOOSE_SELECTED_FOREGROUND=0
   export GUM_CHOOSE_SELECTED_BACKGROUND=2
+  export GUM_INPUT_CURSOR_FOREGROUND=2
   export GUM_INPUT_PROMPT_FOREGROUND=6
-  local pad="0 0 0 $PADDING_LEFT"
+  export GUM_INPUT_PLACEHOLDER_FOREGROUND=8
+  # Recompute padding each call — console size can change after clear.
+  local pad_l=$(( ( $(hw_cols) - LOGO_WIDTH ) / 2 ))
+  [ "$pad_l" -lt 0 ] && pad_l=0
+  local pad="0 0 0 $pad_l"
   export GUM_CHOOSE_PADDING="$pad"
   export GUM_CONFIRM_PADDING="$pad"
   export GUM_INPUT_PADDING="$pad"
@@ -505,52 +509,65 @@ hw_gum_theme() {
 hw_gum_theme
 
 hw_draw_logo() {
-  if command -v gum &>/dev/null; then
-    gum style --foreground 2 --padding "1 0 0 $PADDING_LEFT" \
-      "$(printf '%s\n' "${STARMAN_LINES[@]}")" >/dev/tty
-  else
-    for _hw_l in "${STARMAN_LINES[@]}"; do
-      cecho "$_hw_l" "$HW_GB" "$HW_R"
-    done
-  fi
-  local bpad; bpad=$(hw_pad 46)
+  local cols pad_l line
+  cols=$(hw_cols)
+  pad_l=$(( (cols - LOGO_WIDTH) / 2 ))
+  [ "$pad_l" -lt 0 ] && pad_l=0
+  # Always draw ASCII ourselves — gum style destroys fixed-width art.
   {
-    printf '%s%s%s\n' "$bpad" "$HW_GB" "┌────────────────────────────────────────────┐"
-    printf '%s%s%s\n' "$bpad" "$HW_GB" "│       HyperWebster OS · hyperarch · Starman  │"
-    printf '%s%s%s\n' "$bpad" "$HW_GB" "└────────────────────────────────────────────┘"
-    printf '%s' "$HW_R"
+    echo
+    for line in "${STARMAN_LINES[@]}"; do
+      printf '%*s%s%s%s\n' "$pad_l" '' "$HW_GB" "$line" "$HW_R"
+    done
+    echo
+    # Title as plain centered text (no box-drawing — missing glyphs on some
+    # live consoles made this look like a stuck gum input with a cursor).
+    printf '%s%s%s%s\n' "$(hw_pad 28)" "$HW_GB" "HyperWebster OS · Starman" "$HW_R"
+    printf '%s%s%s%s\n' "$(hw_pad 18)" "$HW_DIM" "hyperarch" "$HW_R"
+    echo
   } >/dev/tty
 }
 
 hw_step_begin() {
   HW_STEP=$((HW_STEP + 1))
   clear >/dev/tty
+  hw_gum_theme
   hw_draw_logo
-  cecho "Step ${HW_STEP}/${HW_TOTAL} · $1" "$HW_CYAN" "$HW_R"
+  tcecho "Step ${HW_STEP}/${HW_TOTAL} · $1" "$HW_CYAN" "$HW_R"
   echo >/dev/tty
 }
 
 # Text / password prompts — gum input when available.
+# Always print a label on its own line so the field is never confused with the
+# banner (gum input alone can look like a green title bar on some consoles).
 hw_read() {
   local var="$1" prompt="$2" default="${3:-}"
+  tcecho "$prompt" "$HW_CYAN" "$HW_R"
   if command -v gum &>/dev/null; then
-    local -a args=(input --placeholder "$prompt")
+    local -a args=(input --placeholder "${default:-$prompt}")
     [ -n "$default" ] && args+=(--value "$default")
-    local val; val=$(gum "${args[@]}" </dev/tty 2>/dev/null) || val=""
+    local val
+    val=$(gum "${args[@]}" </dev/tty) || val=""
     if [ -z "$val" ] && [ -n "$default" ]; then val="$default"; fi
     printf -v "$var" '%s' "$val"
   else
-    cread "$var" "$prompt"
-    if [ -n "$default" ] && [ -z "${!var}" ]; then printf -v "$var" '%s' "$default"; fi
+    if [ -n "$default" ]; then
+      cread "$var" "> "
+      [ -z "${!var}" ] && printf -v "$var" '%s' "$default"
+    else
+      cread "$var" "> "
+    fi
   fi
 }
 hw_secret() {
   local var="$1" prompt="$2"
+  tcecho "$prompt" "$HW_CYAN" "$HW_R"
   if command -v gum &>/dev/null; then
-    local val; val=$(gum input --password --placeholder "$prompt" </dev/tty 2>/dev/null) || val=""
+    local val
+    val=$(gum input --password --placeholder "••••••••" </dev/tty) || val=""
     printf -v "$var" '%s' "$val"
   else
-    csecret "$var" "$prompt"
+    csecret "$var" "> "
   fi
 }
 
