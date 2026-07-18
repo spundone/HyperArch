@@ -12,7 +12,7 @@ Cherry-picks the **Install** workflow from [Omarchy](https://omarchy.org)'s
 | Key | Action |
 |-----|--------|
 | `Super+Alt+Space` | `hyperwebster-omarchy-menu` (install/control menu) |
-| `F10` | Settings (caelestia nexus — moved off Super+Alt+Space) |
+| `F10` | Settings (`hyperwebster-settings`) |
 
 `Super+Space` stays the app launcher. `Super+I` still opens Shelly.
 
@@ -27,7 +27,7 @@ Cherry-picks the **Install** workflow from [Omarchy](https://omarchy.org)'s
 | Install → Quick picks | common apps | Steam, Firefox, OBS, … |
 | Remove → Package | `omarchy-pkg-remove` | `hyperwebster-pkg-remove` |
 | App store | (Omarchy uses menus) | Shelly (`Super+I` alias in menu) |
-| Settings / Maintenance | Setup / system tools | caelestia nexus / `hyperwebster-maint` |
+| Settings / Maintenance | Setup / system tools | `hyperwebster-settings` / `hyperwebster-maint` |
 | Learn → Keybindings | `omarchy-menu-keybindings` | `hyperwebster-keybinds` |
 
 ## Deliberately not ported

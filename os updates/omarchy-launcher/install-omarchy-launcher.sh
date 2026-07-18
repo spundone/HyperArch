@@ -12,12 +12,19 @@ MARK_END='# <<< hyperwebster-omarchy-launcher <<<'
 
 mkdir -p "$BIN" "$LAYER"
 for script in hyperwebster-omarchy-menu hyperwebster-pkg-install \
-              hyperwebster-pkg-aur-install hyperwebster-pkg-remove; do
+              hyperwebster-pkg-aur-install hyperwebster-pkg-remove \
+              hyperwebster-settings; do
   install -m 0755 "$SRC/$script" "$BIN/$script"
 done
 install -m 0644 "$SRC/README.md" "$LAYER/README.md"
 install -m 0644 "$SRC/omarchy-launcher-keys.conf" "$LAYER/omarchy-launcher-keys.conf"
 echo ":: installed omarchy-launcher scripts -> $BIN"
+
+# Keep F10 / Settings bind pointing at the working opener (not bare `caelestia nexus`).
+if [ -f "$HYPRUSER" ]; then
+  sed -i 's|^bind = , F10, exec, caelestia nexus$|bind = , F10, exec, hyperwebster-settings|' "$HYPRUSER" 2>/dev/null || true
+  sed -i 's|^bind = , F10, exec, caelestia shell nexus open$|bind = , F10, exec, hyperwebster-settings|' "$HYPRUSER" 2>/dev/null || true
+fi
 
 if [ ! -f "$HYPRUSER" ]; then
   echo "NOTE: $HYPRUSER not found — append omarchy-launcher-keys.conf manually."

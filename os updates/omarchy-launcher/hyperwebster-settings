@@ -1,0 +1,27 @@
+#!/bin/sh
+# hyperwebster-settings — open Caelestia/NoSignal Settings (nexus).
+# Tries Hyprland global shortcut first, then caelestia-cli / qs IPC.
+set -eu
+
+try() {
+  "$@" >/dev/null 2>&1
+}
+
+# Running shell shortcut (most reliable when Hyprland + qs are up).
+if command -v hyprctl >/dev/null 2>&1; then
+  try hyprctl dispatch global caelestia:nexus && exit 0
+fi
+
+# caelestia-cli IPC (upstream spelling).
+if command -v caelestia >/dev/null 2>&1; then
+  try caelestia shell nexus open && exit 0
+  try caelestia shell -d nexus open && exit 0
+fi
+
+# Direct quickshell IPC (shell config name is still "caelestia" on HyperWebster).
+if command -v qs >/dev/null 2>&1; then
+  try qs -c caelestia ipc call nexus open && exit 0
+fi
+
+echo "hyperwebster-settings: could not open Settings (is the desktop shell running?)" >&2
+exit 1

@@ -201,7 +201,7 @@ Learn") in
       command -v shelly-ui >/dev/null 2>&1 && exec shelly-ui || \
         show_install_menu
       ;;
-    Settings) exec caelestia nexus ;;
+    Settings) exec hyperwebster-settings ;;
     Maintenance) exec hyperwebster-maint ;;
     Keybindings) exec hyperwebster-keybinds ;;
     Learn) show_learn_menu ;;

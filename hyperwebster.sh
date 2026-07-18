@@ -1884,9 +1884,9 @@ cat > "$M_HOME/.config/caelestia/hypr-user.conf" <<'HYPERWEBSTER_HYPRUSER'
 exec-once = qs -c overview -d
 bind = Super, Grave, exec, qs ipc -c overview call overview toggle
 
-# F10: Settings (caelestia nexus). Super+Alt+Space: Omarchy install menu
+# F10: Settings (nexus). Super+Alt+Space: Omarchy install menu
 # (hyperwebster-omarchy-menu — see omarchy-launcher/; float-toggle is Super+T).
-bind = , F10, exec, caelestia nexus
+bind = , F10, exec, hyperwebster-settings
 bind = Super+Alt, Space, exec, hyperwebster-omarchy-menu
 
 # hyprmoncfg writes monitor layout/resolution + workspace assignments here
@@ -2042,6 +2042,7 @@ install -m 755 "$LAYER/hyperwebster-keybinds" "$LAYER/hyperwebster-keybinds-gen"
   "$LAYER/launcher-raycast/hyperwebster-launcher-raycast" \
   "$LAYER/omarchy-extras/hyperwebster-omarchy-extras-toggle" \
   "$LAYER/omarchy-launcher/hyperwebster-omarchy-menu" \
+  "$LAYER/omarchy-launcher/hyperwebster-settings" \
   "$LAYER/omarchy-launcher/hyperwebster-pkg-install" \
   "$LAYER/omarchy-launcher/hyperwebster-pkg-aur-install" \
   "$LAYER/omarchy-launcher/hyperwebster-pkg-remove" \
