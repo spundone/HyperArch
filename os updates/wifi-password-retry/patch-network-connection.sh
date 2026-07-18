@@ -23,8 +23,9 @@ TARGET=${TARGET:-/etc/xdg/quickshell/caelestia/utils/NetworkConnection.qml}
 
 [ -f "$TARGET" ] || { echo "caelestia-shell not found at $TARGET — nothing to patch"; exit 0; }
 
-if grep -q 'hyperwebster wifi-password-retry' "$TARGET"; then
-  echo ":: NetworkConnection.qml already patched"
+# Upstream nosignal-shell may already ship this fix under a NoSignal marker.
+if grep -qE 'hyperwebster wifi-password-retry|NoSignal wifi-password-retry' "$TARGET"; then
+  echo ":: NetworkConnection.qml already has wrong-password recovery"
   exit 0
 fi
 
@@ -32,7 +33,7 @@ cp -n "$TARGET" "$TARGET.pre-hyperwebster"
 
 perl -0pi -e 's/if \(hasSavedProfile\) \{\s*\n\s*Nmcli\.connectToNetwork\(network\.ssid, "", network\.bssid, null\);\s*\n(\s*)\} else \{/if (hasSavedProfile) {\n                \/\/ >>> hyperwebster wifi-password-retry >>>\n                \/\/ A saved profile can hold a wrong password. Stock code passed\n                \/\/ a null callback here, so a failed activation never re-prompted.\n                \/\/ On auth failure: forget the bad profile and reopen the dialog.\n                Nmcli.connectToNetwork(network.ssid, "", network.bssid, result => {\n                    if (result \&\& result.needsPassword) {\n                        if (Nmcli.pendingConnection) {\n                            Nmcli.connectionCheckTimer.stop();\n                            Nmcli.immediateCheckTimer.stop();\n                            Nmcli.immediateCheckTimer.checkCount = 0;\n                            Nmcli.pendingConnection = null;\n                        }\n                        Nmcli.forgetNetwork(network.ssid);\n                        if (session \&\& session.network) {\n                            session.network.showPasswordDialog = true;\n                            session.network.pendingNetwork = network;\n                        } else if (onPasswordNeeded) {\n                            onPasswordNeeded(network);\n                        }\n                    }\n                });\n                \/\/ <<< hyperwebster wifi-password-retry <<<\n$1} else {/' "$TARGET"
 
-if grep -q 'hyperwebster wifi-password-retry' "$TARGET"; then
+if grep -qE 'hyperwebster wifi-password-retry|NoSignal wifi-password-retry' "$TARGET"; then
   echo ":: patched $TARGET (Wi-Fi wrong-password recovery)"
 else
   echo "WARNING: patch did not apply — upstream NetworkConnection.qml changed shape." >&2
