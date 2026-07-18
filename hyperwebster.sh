@@ -248,10 +248,25 @@ AUR_BUILD_ORDER=(
   yay-bin shelly-bin hyprmoncfg btrfs-assistant-git
 )
 
-# Clean up the work dir on any exit (success, error, or Ctrl-C). 2>/dev/null
-# is in case $WORK never got created (e.g. we exited before mkdir). The
-# offline payload cache in $OFFLINE is deliberately NOT cleaned.
-trap 'sudo rm -rf "$WORK" 2>/dev/null || true' EXIT
+# Clean the unsquash workspace. Never delete $WORK itself when it is a Docker
+# volume mount point (rm -rf would fail with "Device or resource busy").
+clear_work_tree() {
+  [ -n "${WORK:-}" ] || return 0
+  if [ ! -d "$WORK" ]; then
+    mkdir -p "$WORK" 2>/dev/null || sudo mkdir -p "$WORK"
+    return 0
+  fi
+  if mountpoint -q "$WORK" 2>/dev/null; then
+    sudo find "$WORK" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+  else
+    sudo rm -rf "$WORK"
+    mkdir -p "$WORK" 2>/dev/null || sudo mkdir -p "$WORK"
+  fi
+}
+
+# Clean up the work dir on any exit (success, error, or Ctrl-C). The offline
+# payload cache in $OFFLINE is deliberately NOT cleaned.
+trap 'clear_work_tree' EXIT
 
 BUILD_MIRRORLIST="$OFFLINE/build-mirrorlist"
 
@@ -2988,7 +3003,7 @@ fi
 build_offline_payload
 
 # ---- workspace -----------------------------------------------------------
-sudo rm -rf "$WORK"
+clear_work_tree
 mkdir -p "$WORK"
 SFS_DIR="$WORK/airootfs"
 
@@ -3120,7 +3135,9 @@ xorriso \
 # ---- cleanup ------------------------------------------------------------
 sudo chown "${INVOKING_UID:-$(id -u "$INVOKING_USER")}:${INVOKING_GID:-$(id -g "$INVOKING_USER")}" "$OUT_ISO" 2>/dev/null \
   || sudo chown "$INVOKING_USER:$INVOKING_GROUP" "$OUT_ISO"
-sudo rm -rf "$WORK"
+clear_work_tree
+# Avoid double-clean on EXIT after a successful finish.
+trap - EXIT
 
 echo
 echo "=========================================================="
