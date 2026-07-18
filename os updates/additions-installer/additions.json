@@ -121,7 +121,7 @@
       "desc": "Install games → Add to Steam → play under Non-Steam in Starman",
       "icon": "sports_esports",
       "check": "command -v heroic >/dev/null 2>&1 || pacman -Q heroic-games-launcher-bin >/dev/null 2>&1 || pacman -Q heroic-games-launcher >/dev/null 2>&1",
-      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-heroic"
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; \"$HOME/.local/bin/hyperwebster-install-heroic\""
     },
     {
       "id": "steam-rom-manager",
@@ -131,7 +131,7 @@
       "desc": "Add emulator ROMs to Steam as Non-Steam shortcuts for gamescope",
       "icon": "videogame_asset",
       "check": "test -x \"$HOME/.local/bin/steam-rom-manager\" || command -v steam-rom-manager >/dev/null 2>&1",
-      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-steam-rom-manager"
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; \"$HOME/.local/bin/hyperwebster-install-steam-rom-manager\""
     },
     {
       "id": "decky",
@@ -141,7 +141,7 @@
       "desc": "Game Mode Quick Access plugins — avoid stacking with Millennium",
       "icon": "extension",
       "check": "test -x \"$HOME/homebrew/services/PluginLoader\"",
-      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-decky"
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; \"$HOME/.local/bin/hyperwebster-install-decky\""
     },
     {
       "id": "millennium",
@@ -151,7 +151,7 @@
       "desc": "Steam themes/plugins + Lua backends — mods Steam, not gamescope",
       "icon": "palette",
       "check": "test -d \"$HOME/.millennium\" || test -e /usr/lib/millennium || pacman -Q millennium >/dev/null 2>&1",
-      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; hyperwebster-install-millennium"
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; \"$HOME/.local/bin/hyperwebster-install-millennium\""
     },
     {
       "id": "wine",
