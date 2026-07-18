@@ -134,6 +134,11 @@ or full `hyperwebster-update --no-packages --no-snapshot`. Terminal workaround:
 **Symptom:** Plymouth asks for a disk passphrase on every cold boot, or you only
 see a black screen until you press Esc.
 
+**Cause (ISO 2026-07-18):** installer TPM enroll used a bogus
+`systemd-cryptenroll --unlock-passphrase` flag, so enrollment always failed and
+left passphrase-only unlock. Fixed on `main` (`--unlock-key-file`); re-enroll
+after `hyperwebster-update`.
+
 **Quick fix on the installed PC:**
 
 ```sh
@@ -150,16 +155,16 @@ Replace `YOUR-LUKS-PARTUUID` with the LUKS partition from `lsblk -o NAME,PARTUUI
 ```mermaid
 flowchart TD
   A[Cold boot] --> B{TPM token enrolled?}
-  B -->|No| C[Passphrase every boot — expected]
+  B -->|No| C[Passphrase every boot - expected]
   B -->|Yes| D{TPM unlock succeeds?}
   D -->|Yes| E[SDDM / desktop]
   D -->|No| F[Plymouth passphrase prompt]
   F --> G{USB keyboard attached?}
   G -->|Yes| H[Enter LUKS passphrase]
-  G -->|No| I[Plug keyboard — controllers cannot type passphrase]
+  G -->|No| I[Plug keyboard - controllers cannot type passphrase]
   H --> E
   C --> J["sudo hyperwebster-luks-tpm-enroll --pcrs 7+11 DEVICE"]
-  J --> K[Reboot — should auto-unlock]
+  J --> K[Reboot - should auto-unlock]
   F --> L{Black screen no prompt?}
   L -->|Yes| M[Press Esc for TTY fallback]
   M --> N[hyperwebster-update then reboot]
@@ -170,6 +175,6 @@ flowchart TD
 | Full diagnostic | `sudo hyperwebster-luks-tpm-status` |
 | TPM tokens on disk | `sudo systemd-cryptenroll --list /dev/disk/by-partuuid/…` |
 | Initramfs hooks | `grep -E 'plymouth|sd-encrypt' /etc/mkinitcpio.conf` |
-| Kernel LUKS params | `cat /proc/cmdline` — expect `rd.luks.name=` |
+| Kernel LUKS params | `cat /proc/cmdline` - expect `rd.luks.name=` |
 
 See [HARDWARE.md](HARDWARE.md#luks-tpm-auto-unlock) for enrollment details and PCR notes.
