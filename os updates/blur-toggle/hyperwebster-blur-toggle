@@ -19,8 +19,8 @@ HYPRUSER="${HOME}/.config/caelestia/hypr-user.conf"
 STATE="${HOME}/.local/state/hyperwebster/blur-enabled"
 MARK_BEGIN='# >>> hyperwebster-blur-toggle >>>'
 MARK_END='# <<< hyperwebster-blur-toggle <<<'
-# Keep under Theme.barBg alpha (0.50–0.60) so the glass fill is blurred.
-NSBAR_IGNORE_ALPHA='0.45'
+# Keep under Theme.barBg alpha (~0.60) so the glass fill is blurred.
+NSBAR_IGNORE_ALPHA='0.40'
 
 usage() {
   echo "Usage: hyperwebster-blur-toggle {enable|disable|status|toggle}" >&2
@@ -147,6 +147,7 @@ apply_live_keywords() {
     hyprctl keyword decoration:blur:passes 3 >/dev/null 2>&1 || true
     hyprctl keyword decoration:blur:popups true >/dev/null 2>&1 || true
     for ns in nsbar nspanels caelestia-drawers; do
+      # Hyprland requires a value: "blur on" / "blur off" (bare "blur," is invalid).
       hyprctl keyword "layerrule blur on, match:namespace ${ns}" >/dev/null 2>&1 || true
       hyprctl keyword "layerrule ignore_alpha ${NSBAR_IGNORE_ALPHA}, match:namespace ${ns}" >/dev/null 2>&1 || true
     done
