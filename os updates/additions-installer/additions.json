@@ -26,7 +26,7 @@
       "desc": "Reset caelestia to HyperWebster dark glass defaults (backs up first)",
       "icon": "build",
       "check": "command -v hyperwebster-caelestia-repair",
-      "install": "sh \"$HOME/.local/share/hyperwebster/caelestia-repair/install-caelestia-repair.sh\" && hyperwebster-caelestia-repair"
+      "install": "sh \"$HOME/.local/share/hyperwebster/caelestia-repair/install-caelestia-repair.sh\" && hyperwebster-caelestia-repair --hard"
     },
     {
       "id": "rounding",

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# hyperwebster-caelestia-repair — reset broken caelestia user config to
+# hyperwebster-caelestia-repair - reset broken caelestia user config to
 # HyperWebster glass defaults without wiping wallpapers or named schemes.
 #
-# Fixes: light-mode white Nexus, GoogleSansFlex bar glyphs, missing frost,
-# opaque/broken shell.json after the #23–#31 migration cascade.
+# After PR #23, bright wallpapers + smartScheme (default true) flip Material You
+# to light mode. Nexus Wallpaper & style then fills with white m3surface.
+# jq ".mode=dark" alone is not enough if colours stay a light palette.
 set -euo pipefail
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -17,21 +18,21 @@ DEFAULTS="$HERE/defaults"
 HARD=0
 NO_BLUR=0
 NO_RESTART=0
-RESEED_SCHEME=0
+RESEED_SCHEME=1  # default ON: always write a full dark palette, not just mode=
 
 usage() {
   cat <<'EOF'
 Usage: hyperwebster-caelestia-repair [options]
 
-  Soft repair (default): backup, force dark mode, glass transparency,
-  JetBrainsMono fonts, wallpaper on, re-patch Theme/Colours, enable blur.
+  Soft repair (default): kill shell, force smartScheme off, write full dark
+  scheme seed, re-apply wallpaper with --no-smart, glass fonts/blur, restart.
 
-  --hard            Also rewrite shell.json / shell-tokens.json from defaults
-                    (keeps launcher + bar blocks from the live file when present)
-  --reseed-scheme   Replace scheme.json with assets/scheme-shadotheme dark seed
-  --no-blur         Skip hyperwebster-blur-toggle enable
-  --no-restart      Do not kill/restart caelestia shell
-  -h, --help        Show this help
+  --hard              Also rewrite shell.json / shell-tokens.json from defaults
+  --reseed-scheme     (default) Write full dark shadotheme seed as last scheme step
+  --keep-scheme       Do not replace scheme.json colours (only force mode=dark)
+  --no-blur           Skip hyperwebster-blur-toggle enable
+  --no-restart        Do not kill/restart caelestia shell at the end
+  -h, --help          Show this help
 EOF
 }
 
@@ -39,6 +40,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --hard) HARD=1 ;;
     --reseed-scheme) RESEED_SCHEME=1 ;;
+    --keep-scheme) RESEED_SCHEME=0 ;;
     --no-blur) NO_BLUR=1 ;;
     --no-restart) NO_RESTART=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -49,7 +51,7 @@ done
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
-    echo "WARNING: $1 not found — skipping related step" >&2
+    echo "WARNING: $1 not found - skipping related step" >&2
     return 1
   }
 }
@@ -61,6 +63,63 @@ run_sudo_patch() {
     sh "$script" || true
   else
     sudo sh "$script" 2>/dev/null || sh "$script" 2>/dev/null || true
+  fi
+}
+
+find_seed() {
+  local cand
+  for cand in \
+    "$DEFAULTS/scheme-shadotheme.json" \
+    "$HERE/../../assets/scheme-shadotheme.json" \
+    "$SHARE/../assets/scheme-shadotheme.json" \
+    /usr/share/hyperwebster/scheme-shadotheme.json
+  do
+    if [ -f "$cand" ]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+kill_shell() {
+  export LANG="${LANG:-en_US.UTF-8}"
+  case "$LANG" in
+    *.UTF-8*|*.utf8*) ;;
+    *) export LANG=en_US.UTF-8 ;;
+  esac
+  qs -c caelestia kill 2>/dev/null || true
+  # Wait until the old instance is actually gone (stock kill is racy).
+  local i
+  for i in $(seq 1 40); do
+    qs -c caelestia ipc show >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  sleep 0.2
+}
+
+write_full_dark_scheme() {
+  local seed=""
+  seed=$(find_seed) || seed=""
+  mkdir -p "$STATE"
+  if [ -n "$seed" ]; then
+    cp -a "$seed" "$STATE/scheme.json"
+    # Ensure mode is dark even if a seed copy was edited.
+    if need_cmd jq; then
+      tmp=$(mktemp)
+      jq '.mode = "dark"' "$STATE/scheme.json" > "$tmp" && mv "$tmp" "$STATE/scheme.json"
+    else
+      sed -i 's/"mode"[[:space:]]*:[[:space:]]*"light"/"mode": "dark"/g' "$STATE/scheme.json"
+    fi
+    echo ":: wrote full dark scheme from $(basename "$seed")"
+  else
+    echo "WARNING: dark scheme seed not found - forcing mode=dark only" >&2
+    if [ -f "$STATE/scheme.json" ] && need_cmd jq; then
+      tmp=$(mktemp)
+      jq '.mode = "dark"' "$STATE/scheme.json" > "$tmp" && mv "$tmp" "$STATE/scheme.json"
+    elif [ -f "$STATE/scheme.json" ]; then
+      sed -i 's/"mode"[[:space:]]*:[[:space:]]*"light"/"mode": "dark"/g' "$STATE/scheme.json"
+    fi
   fi
 }
 
@@ -77,41 +136,11 @@ echo ":: backup -> $BK"
 
 mkdir -p "$CFG" "$STATE" "$HWSTATE"
 
-# ── Dark scheme ─────────────────────────────────────────────────────────────
-if [ "$RESEED_SCHEME" -eq 1 ]; then
-  SEED=""
-  for cand in \
-    "$HERE/../../assets/scheme-shadotheme.json" \
-    "$SHARE/../assets/scheme-shadotheme.json" \
-    /usr/share/hyperwebster/scheme-shadotheme.json
-  do
-    [ -f "$cand" ] && SEED="$cand" && break
-  done
-  # Layer may ship a copy under defaults/
-  [ -z "$SEED" ] && [ -f "$DEFAULTS/scheme-shadotheme.json" ] && SEED="$DEFAULTS/scheme-shadotheme.json"
-  if [ -n "$SEED" ]; then
-    cp -a "$SEED" "$STATE/scheme.json"
-    echo ":: reseeded scheme.json from $(basename "$SEED")"
-  else
-    echo "WARNING: scheme seed not found — forcing mode=dark only" >&2
-  fi
-fi
+# ── Kill shell first so FileView cannot race-rewrite scheme.json ────────────
+echo ":: stopping caelestia shell before config rewrite"
+kill_shell
 
-if need_cmd caelestia; then
-  caelestia scheme set --notify -m dark 2>/dev/null \
-    || caelestia scheme set -m dark 2>/dev/null \
-    || true
-fi
-if [ -f "$STATE/scheme.json" ] && need_cmd jq; then
-  tmp=$(mktemp)
-  jq '.mode = "dark"' "$STATE/scheme.json" > "$tmp" && mv "$tmp" "$STATE/scheme.json"
-  echo ":: scheme mode=dark"
-elif [ -f "$STATE/scheme.json" ]; then
-  sed -i 's/"mode"[[:space:]]*:[[:space:]]*"light"/"mode": "dark"/g' "$STATE/scheme.json"
-  echo ":: scheme mode forced dark (sed)"
-fi
-
-# ── shell.json ──────────────────────────────────────────────────────────────
+# ── shell.json first (smartScheme MUST be false before any wallpaper call) ──
 SHELLJSON="$CFG/shell.json"
 if [ "$HARD" -eq 1 ] && [ -f "$DEFAULTS/shell.json" ]; then
   if [ -f "$SHELLJSON" ] && need_cmd jq; then
@@ -156,14 +185,42 @@ if [ -f "$SHELLJSON" ] && need_cmd jq; then
     | .services = (.services // {})
     | .services.smartScheme = false
   ' "$SHELLJSON" > "$tmp" && mv "$tmp" "$SHELLJSON"
-  echo ":: shell.json glass + fonts + wallpaper + smartScheme off"
+  echo ":: shell.json glass + fonts + wallpaper + smartScheme=false"
 fi
 
-# ── shell-tokens (hard only, or missing) ────────────────────────────────────
 TOKENS="$CFG/shell-tokens.json"
 if { [ "$HARD" -eq 1 ] || [ ! -f "$TOKENS" ]; } && [ -f "$DEFAULTS/shell-tokens.json" ]; then
   cp -a "$DEFAULTS/shell-tokens.json" "$TOKENS"
   echo ":: shell-tokens.json restored from defaults"
+fi
+
+# ── Dark scheme: full palette last (never mode-only on a light colour map) ──
+# Do NOT call `caelestia scheme set -m dark` here: if mode is already dark it
+# early-returns without rewriting colours, and dynamic+smart can race light.
+if [ "$RESEED_SCHEME" -eq 1 ]; then
+  write_full_dark_scheme
+else
+  if [ -f "$STATE/scheme.json" ] && need_cmd jq; then
+    tmp=$(mktemp)
+    jq '.mode = "dark"' "$STATE/scheme.json" > "$tmp" && mv "$tmp" "$STATE/scheme.json"
+    echo ":: scheme mode=dark (--keep-scheme; colours unchanged)"
+  fi
+fi
+
+# ── Re-apply current wallpaper with --no-smart so bright walls stay dark ───
+WALL_PATH=""
+if [ -f "$STATE/wallpaper/path.txt" ]; then
+  WALL_PATH=$(tr -d '\n' < "$STATE/wallpaper/path.txt" | sed 's/[[:space:]]*$//')
+fi
+if [ -n "$WALL_PATH" ] && [ -f "$WALL_PATH" ] && need_cmd caelestia; then
+  caelestia wallpaper -f "$WALL_PATH" --no-smart 2>/dev/null \
+    || caelestia wallpaper -f "$WALL_PATH" 2>/dev/null \
+    || true
+  echo ":: wallpaper re-applied with --no-smart: $WALL_PATH"
+  # Wallpaper CLI may rewrite scheme for dynamic; stamp dark seed again LAST.
+  if [ "$RESEED_SCHEME" -eq 1 ]; then
+    write_full_dark_scheme
+  fi
 fi
 
 # ── Theme / Colours patches ─────────────────────────────────────────────────
@@ -187,30 +244,46 @@ if [ "$NO_BLUR" -eq 0 ]; then
   fi
 fi
 
-# ── App theme sync (GTK / etc.) ─────────────────────────────────────────────
 if command -v hyperwebster-app-theme-sync >/dev/null 2>&1; then
   hyperwebster-app-theme-sync 2>/dev/null || true
 fi
 
+# ── Final dark stamp (after blur/theme tools that might touch config) ───────
+if [ "$RESEED_SCHEME" -eq 1 ]; then
+  write_full_dark_scheme
+fi
+# smartScheme must still be false after any tool merges.
+if [ -f "$SHELLJSON" ] && need_cmd jq; then
+  tmp=$(mktemp)
+  jq '.services = (.services // {}) | .services.smartScheme = false' "$SHELLJSON" > "$tmp" \
+    && mv "$tmp" "$SHELLJSON"
+fi
+
+# ── Verify ──────────────────────────────────────────────────────────────────
+echo ":: verification"
+if [ -f "$STATE/scheme.json" ] && need_cmd jq; then
+  jq -r '"    scheme mode=\(.mode) surface=\(.colours.surface // .colours.Surface // "?") name=\(.name)"' \
+    "$STATE/scheme.json" || true
+fi
+if [ -f "$SHELLJSON" ] && need_cmd jq; then
+  jq -r '"    smartScheme=\(.services.smartScheme) transparency=\(.appearance.transparency.enabled)"' \
+    "$SHELLJSON" || true
+fi
+
 # ── Restart shell ───────────────────────────────────────────────────────────
 if [ "$NO_RESTART" -eq 0 ]; then
-  export LANG="${LANG:-en_US.UTF-8}"
-  case "$LANG" in
-    *.UTF-8*|*.utf8*) ;;
-    *) export LANG=en_US.UTF-8 ;;
-  esac
-  qs -c caelestia kill 2>/dev/null || true
-  sleep 0.3
+  kill_shell
   if command -v caelestia >/dev/null 2>&1; then
     setsid caelestia shell -d >/dev/null 2>&1 || caelestia shell -d >/dev/null 2>&1 || true
   fi
   echo ":: caelestia shell restarted"
 else
-  echo ":: restart skipped — run: Ctrl+Super+Alt+R"
+  echo ":: restart skipped - run: Ctrl+Super+Alt+R"
 fi
 
 echo
 echo "Done. Backup: $BK"
-echo "If Nexus is still white: Settings → Colours → Dark theme ON, Smart colour scheme OFF."
+echo "Nexus should be dark glass. Keep Settings → Services → Smart colour scheme OFF"
+echo "for bright wallpapers, or they will flip light again."
 echo "If the bar is still a hairline on 4K: Super+Ctrl+H → scale 1.5 or 2."
 exit 0
