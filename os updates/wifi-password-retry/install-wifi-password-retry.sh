@@ -13,9 +13,28 @@ set -eu
 SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SHARE="$HOME/.local/share/hyperwebster/wifi-password-retry"
 
+if [ -f "$SRC/../hyperwebster-update/lib/hw-install-file.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$SRC/../hyperwebster-update/lib/hw-install-file.sh"
+else
+  hw_install_file() {
+    _s=$1; _d=$2; _m=${3:-0644}
+    [ -f "$_s" ] || return 0
+    _sr=$(readlink -f "$_s" 2>/dev/null || echo "$_s")
+    _dr=
+    [ -e "$_d" ] && _dr=$(readlink -f "$_d" 2>/dev/null || echo "$_d")
+    if [ -n "$_dr" ] && [ "$_sr" = "$_dr" ]; then
+      chmod "$_m" "$_d" 2>/dev/null || true
+      return 0
+    fi
+    mkdir -p "$(dirname -- "$_d")"
+    install -m "$_m" "$_s" "$_d"
+  }
+fi
+
 # 1. Stable on-system copy of the patch (the pacman hook points here).
 mkdir -p "$SHARE"
-install -m 0755 "$SRC/patch-network-connection.sh" "$SHARE/patch-network-connection.sh"
+hw_install_file "$SRC/patch-network-connection.sh" "$SHARE/patch-network-connection.sh" 0755
 
 # 2. Apply the QML patch now.
 sudo sh "$SHARE/patch-network-connection.sh"
