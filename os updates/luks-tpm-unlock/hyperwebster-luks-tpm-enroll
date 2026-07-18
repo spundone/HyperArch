@@ -112,18 +112,25 @@ fi
 DEVICE=$(readlink -f "$DEVICE" 2>/dev/null || echo "$DEVICE")
 
 if [[ $DRYRUN -eq 1 ]]; then
-  echo "+ systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=$PCRS --unlock-passphrase $DEVICE"
+  if [[ -n "$PASS_FILE" ]]; then
+    echo "+ systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=$PCRS --unlock-key-file=$PASS_FILE $DEVICE"
+  else
+    echo "+ systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=$PCRS $DEVICE"
+  fi
   exit 0
 fi
 
 enroll() {
   local pcrs="$1"
-  local args=(--tpm2-device=auto --tpm2-pcrs="$pcrs" --unlock-passphrase "$DEVICE")
+  local args=(--tpm2-device=auto --tpm2-pcrs="$pcrs")
+  # --unlock-passphrase is not a systemd-cryptenroll option (causes
+  # "unrecognized option" and silent TPM skip during ISO install).
+  # Use --unlock-key-file for non-interactive; otherwise prompt on stdin.
   if [[ -n "$PASS_FILE" ]]; then
-    systemd-cryptenroll "${args[@]}" <"$PASS_FILE"
-  else
-    systemd-cryptenroll "${args[@]}"
+    args+=(--unlock-key-file="$PASS_FILE")
   fi
+  args+=("$DEVICE")
+  systemd-cryptenroll "${args[@]}"
 }
 
 echo "Enrolling $DEVICE with TPM2 (PCRs: $PCRS)…"
@@ -131,7 +138,11 @@ if enroll "$PCRS"; then
   :
 elif [[ "$PCRS" == "7" ]]; then
   echo "PCR 7 enrollment failed — retrying with PCRs 7+11 (firmware + boot policy)…" >&2
-  enroll "7+11"
+  if ! enroll "7+11"; then
+    echo "TPM enrollment failed — LUKS passphrase unlock is unchanged." >&2
+    diagnose_failure "$DEVICE"
+    exit 1
+  fi
   PCRS="7+11"
 else
   echo "TPM enrollment failed — LUKS passphrase unlock is unchanged." >&2

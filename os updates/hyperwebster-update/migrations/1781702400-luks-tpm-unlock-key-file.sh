@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Migration: refresh LUKS TPM enroll helper (limine-update hook refresh).
+# Migration: fix TPM enroll helper (use --unlock-key-file, not bogus --unlock-passphrase).
 set -euo pipefail
 : "${HYPERWEBSTER_SRC:?HYPERWEBSTER_SRC must point at the HyperWebster source root}"
 SRC="$HYPERWEBSTER_SRC/luks-tpm-unlock"
