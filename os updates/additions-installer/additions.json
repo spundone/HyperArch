@@ -135,6 +135,16 @@
       "disable": "hyperwebster-omarchy-extras-toggle disable"
     },
     {
+      "id": "input-remap",
+      "kind": "install",
+      "category": "system",
+      "name": "Input remap",
+      "desc": "Keyboard & mouse button remapper (keyd gum TUI · Super+Ctrl+I)",
+      "icon": "mouse",
+      "check": "command -v hyperwebster-input-remap && pacman -Q keyd",
+      "install": "sh \"$HOME/.local/share/hyperwebster/input-remap/install-input-remap.sh\""
+    },
+    {
       "id": "iphone-tether",
       "kind": "toggle",
       "category": "system",
