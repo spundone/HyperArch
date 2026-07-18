@@ -224,12 +224,31 @@ if [ -n "$WALL_PATH" ] && [ -f "$WALL_PATH" ] && need_cmd caelestia; then
 fi
 
 # ── Theme / Colours patches ─────────────────────────────────────────────────
+# Strip Colours.transparency from Theme.barBg first - that circular binding
+# leaves Theme.size undefined (NsOverlay barHeight TypeError).
+THEME_QML=/etc/xdg/quickshell/caelestia/services/Theme.qml
+if [ -f "$THEME_QML" ] && grep -q 'Colours.transparency' "$THEME_QML" 2>/dev/null; then
+  if [ -f "$THEME_QML.pre-hyperwebster-barbg" ]; then
+    run_sudo_patch /bin/true 2>/dev/null || true
+    sudo cp -a "$THEME_QML.pre-hyperwebster-barbg" "$THEME_QML" 2>/dev/null || true
+    echo ":: restored Theme.qml from pre-hyperwebster-barbg (size crash)"
+  fi
+fi
+# Drop monitor overlays that shadow global shell.json (HDMI-A-1 etc.).
+if [ -d "$CFG/monitors" ]; then
+  mbk="$HWSTATE/monitors-bak-$(date +%Y%m%d%H%M%S)"
+  mkdir -p "$HWSTATE"
+  cp -a "$CFG/monitors" "$mbk"
+  rm -rf "$CFG/monitors"
+  echo ":: moved monitor overlays aside -> $mbk"
+fi
 run_sudo_patch "$SHARE/appearance-page/patch-theme-font.sh"
 run_sudo_patch "$HERE/../appearance-page/patch-theme-font.sh"
-run_sudo_patch "$SHARE/blur-toggle/patch-theme-nsbar-size.sh"
-run_sudo_patch "$HERE/../blur-toggle/patch-theme-nsbar-size.sh"
+# Safe barBg (no Colours.transparency) BEFORE size bump.
 run_sudo_patch "$SHARE/blur-toggle/patch-theme-nsbar-blur.sh"
 run_sudo_patch "$HERE/../blur-toggle/patch-theme-nsbar-blur.sh"
+run_sudo_patch "$SHARE/blur-toggle/patch-theme-nsbar-size.sh"
+run_sudo_patch "$HERE/../blur-toggle/patch-theme-nsbar-size.sh"
 run_sudo_patch "$SHARE/blur-toggle/patch-colours-nsbar-blur.sh"
 run_sudo_patch "$HERE/../blur-toggle/patch-colours-nsbar-blur.sh"
 
