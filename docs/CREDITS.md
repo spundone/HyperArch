@@ -32,8 +32,10 @@ them. Please support the originals; each remains under its own licence.
 - **btrfsmaintenance** - periodic btrfs scrub timers.
 - **[Omarchy](https://omarchy.org)** - keybinding layout inspiration,
   prebuilt `[omarchy]` repo for Limine snapshot tooling, bash shell setup,
-  utility workflows (share, transcode, OCR) adapted in `omarchy-extras`, and
-  the install menu (`Super+Alt+Space`) adapted in `omarchy-launcher`.
+  utility workflows (share, transcode, OCR) adapted in `omarchy-extras`,
+  the install menu (`Super+Alt+Space`) adapted in `omarchy-launcher`, and
+  theme packs / community git themes / wallpaper-style generation adapted in
+  `omarchy-themes` (converted into caelestia schemes).
 - **[omarchy-send](https://github.com/28allday/omarchy-send)** - LocalSend-compatible
   LAN file transfer (vendored binary).
 - **[omatether](https://github.com/28allday/omatether)** - iPhone USB tethering

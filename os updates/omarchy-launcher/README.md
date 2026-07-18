@@ -29,12 +29,14 @@ Cherry-picks the **Install** workflow from [Omarchy](https://omarchy.org)'s
 | App store | (Omarchy uses menus) | Shelly (`Super+I` alias in menu) |
 | Settings / Maintenance | Setup / system tools | `hyperwebster-settings` / `hyperwebster-maint` |
 | Learn → Keybindings | `omarchy-menu-keybindings` | `hyperwebster-keybinds` |
+| Style → Theme / generate | Style > Theme | `hyperwebster-theme` (see `omarchy-themes/`) |
+| Install → Theme | Install > Style > Theme | `hyperwebster-theme install` |
 
 ## Deliberately not ported
 
-Full Omarchy menu tree (Style, Setup, Update, Trigger, System power menu,
-Walker/Waybar toggles, theme/background switchers). Those stay in caelestia
-Settings, `hyperwebster-maint`, or dedicated HyperWebster keys.
+Full Omarchy Setup / Update / Trigger / power tree, Walker/Waybar CSS theme
+files, and Omarchy wallpaper packs. Colour themes convert into **caelestia
+schemes** (see `omarchy-themes/`). Background cycling stays on Wallpaper & style.
 
 ## Install
 
