@@ -2713,15 +2713,27 @@ CHROOTHOST
       git clone --depth 1 "$HYPERWEBSTER_SHELL_REPO" -b nosignal "$OFFLINE/aur/$name.fork"
       ( cd "$OFFLINE/aur/$name.fork" && git fetch --depth 1 origin "$HYPERWEBSTER_SHELL_COMMIT" && git checkout -q "$HYPERWEBSTER_SHELL_COMMIT" )
       SHELL_ROOT="$OFFLINE/aur/$name.fork" sh "$HYPERWEBSTER_LAYER_DIR/shell-branding/patch-shell-branding.sh"
-      # Keep .git so PKGBUILD pkgver() (git describe) still works.
+      # Shallow pin has no tags — upstream pkgver() (git describe --tags) fails or
+      # can emit illegal pkgver chars. Drop pkgver() and pin a legal static version.
+      shell_short="${HYPERWEBSTER_SHELL_COMMIT:0:7}"
       tar -czf "$OFFLINE/aur/$name/nosignal-shell.tar.gz" \
         -C "$OFFLINE/aur" \
         --transform 's|^nosignal-shell\.fork|nosignal-shell|' \
+        --exclude='nosignal-shell.fork/.git' \
         nosignal-shell.fork
       cp "$OFFLINE/aur/$name.fork/packaging/PKGBUILD" "$OFFLINE/aur/$name/PKGBUILD"
+      # Delete the dynamic pkgver() function (lines from pkgver() through its closing }).
+      awk '
+        /^pkgver\(\)/ { skip=1; next }
+        skip && /^}/ { skip=0; next }
+        skip { next }
+        { print }
+      ' "$OFFLINE/aur/$name/PKGBUILD" > "$OFFLINE/aur/$name/PKGBUILD.pin"
+      mv "$OFFLINE/aur/$name/PKGBUILD.pin" "$OFFLINE/aur/$name/PKGBUILD"
       sed -i \
         -e 's|^source=.*|source=("nosignal-shell.tar.gz")|' \
         -e "s|^sha256sums=.*|sha256sums=('SKIP')|" \
+        -e "s|^pkgver=.*|pkgver=2.0.2.r0.g${shell_short}|" \
         -e 's|DDISTRIBUTOR="NoSignal (package: $_pkgname)"|DDISTRIBUTOR="HyperWebster (package: $_pkgname)"|' \
         -e 's|pkgdesc="NoSignal desktop shell|pkgdesc="HyperWebster desktop shell|' \
         "$OFFLINE/aur/$name/PKGBUILD"
