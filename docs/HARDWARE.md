@@ -39,8 +39,8 @@ primary gaming path for HDR output.
 
 ### High-refresh displays (120/144 Hz)
 
-HyperWebster enables **variable frame rate** (`misc:vfr`) and scales caelestia
-shell animation durations for snappier motion on high-refresh panels. The
+HyperWebster scales caelestia shell animation durations for snappier motion on
+high-refresh panels (Hyprland VFR is on by default since 0.55). The
 `hypersmooth-display` layer ships OOB; optional zephyr overshoot motion is
 available via `hyperwebster-zephyr-polish enable`.
 
