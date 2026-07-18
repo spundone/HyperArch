@@ -31,7 +31,7 @@ delegate: Toggle {
         gmTog.launching = true;
         gmTog.internalChecked = false; // don't latch "on" - it's a launcher
         relockTimer.start();
-        Quickshell.execDetached(["sh", "-c", "[ -x /usr/local/bin/switch-to-gaming ] && [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] && exec /usr/local/bin/switch-to-gaming"]);
+        Quickshell.execDetached(["sh", "-c", "[ -x /usr/local/bin/switch-to-gaming ] && { [ -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam.desktop ] || [ -f /usr/share/wayland-sessions/gamescope-session-steam-plus.desktop ]; } && exec /usr/local/bin/switch-to-gaming"]);
     }
     Timer { id: relockTimer; interval: 5000; onTriggered: gmTog.launching = false }
 }
@@ -53,7 +53,7 @@ delegate: Toggle {
   here - the cosmetic Game Mode is still available via its IPC (`gameMode` target)
   if a future build wants to re-expose it elsewhere.
 - **Hidden when DeckShift isn't installed.** A `deckshiftProbe` Process
-  (`test -f /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop`) sets
+  (`[ -f …-nm.desktop ] || [ -f …-steam.desktop ] || …`) sets
   `root.deckshiftInstalled` at load, and the `quickToggles` filter drops the
   `gameMode` entry when it's false (same pattern as the existing `vpn` special-case)
   - so the tile cleanly leaves the grid (no dead button, no gap) on non-gaming

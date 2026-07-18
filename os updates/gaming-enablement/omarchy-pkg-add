@@ -5,4 +5,14 @@
 # Omarchy-targeted install scripts (e.g. the DeckShift gaming installer) fail at
 # `omarchy-pkg-add: command not found`. This provides the same idempotent
 # package-install behaviour via yay.
+#
+# Callers may pass package names only, or accidentally include -S/--needed/
+# --noconfirm (this shim already adds those). Strip duplicates so pacman does
+# not die with "only one operation may be used at a time".
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -S|--sync|--needed|--noconfirm) shift ;;
+    *) break ;;
+  esac
+done
 exec yay -S --needed --noconfirm "$@"

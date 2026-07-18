@@ -20,12 +20,25 @@ if ! command -v yay >/dev/null 2>&1; then
   exit 1
 fi
 
-PKG_ADD="${HELPER:-yay}"
+# omarchy-pkg-add already runs `yay -S --needed --noconfirm` — do not pass -S
+# again (pacman: "only one operation may be used at a time").
+if [ -x "$HELPER" ]; then
+  PKG_ADD="$HELPER"
+else
+  PKG_ADD="yay"
+fi
 echo "==> Installing Chimera gamescope session packages (AUR)…"
-$PKG_ADD -S --needed --noconfirm \
-  gamescope-session-git \
-  gamescope-session-steam-git \
-  gamescope mangohud
+if [ "$PKG_ADD" = "yay" ]; then
+  yay -S --needed --noconfirm \
+    gamescope-session-git \
+    gamescope-session-steam-git \
+    gamescope mangohud
+else
+  "$PKG_ADD" \
+    gamescope-session-git \
+    gamescope-session-steam-git \
+    gamescope mangohud
+fi
 
 # Session switch scripts (Deckify-compatible interface).
 echo "==> Installing session switch helpers…"
