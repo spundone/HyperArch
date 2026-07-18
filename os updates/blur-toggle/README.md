@@ -1,8 +1,9 @@
 # blur-toggle - optional frosted glass
 
-HyperWebster defaults to a **flat, restrained** desktop (no blur). This component
-adds `hyperwebster-blur-toggle` to enable Raycast-style frosted panels when you
-want them.
+HyperWebster can run a **flat** desktop (no blur) or Raycast-style frosted
+panels. The NoSignal top bar is a Wayland layer with namespace **`nsbar`**
+(popouts: **`nspanels`**). Blur layerrules must match those names — older
+`caelestia-.*` rules never blurred the bar.
 
 ## Usage
 
@@ -15,10 +16,12 @@ hyperwebster-blur-toggle status
 
 Touches:
 
-- `~/.config/caelestia/hypr-vars.conf` - `$blurEnabled`, opacity, rounding
+- `~/.config/caelestia/hypr-vars.conf` - `$blurEnabled`, opacity
 - `~/.config/caelestia/shell.json` - transparency block
-- `~/.config/caelestia/shell-tokens.json` - corner radii
 - `~/.config/quickshell/overview/config.json` - overview glass
-- `~/.config/caelestia/hypr-user.conf` - caelestia layer blur rules
+- `~/.config/caelestia/hypr-user.conf` - `nsbar` / `nspanels` layer blur rules
+- `/etc/xdg/quickshell/caelestia/services/Colours.qml` - shell-driven blur keywords
 
 State: `~/.local/state/hyperwebster/blur-enabled`
+
+After enabling, restart the shell if needed: **Ctrl+Super+Alt+R**.
