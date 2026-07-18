@@ -11,16 +11,17 @@ HYPERWEBSTER_REPO="$HOME/.local/share/hyperwebster"
 mkdir -p "$STATE_DIR"
 
 # Official repo updates (checkupdates is safe: uses a temp db copy, no root).
+# Bound the network wait — offline installs / dead mirrors can hang forever.
 repo=0
 if command -v checkupdates >/dev/null 2>&1; then
-  repo=$(checkupdates 2>/dev/null | grep -c . || true)
+  repo=$(timeout 30 checkupdates 2>/dev/null | grep -c . || true)
 fi
 
 # AUR updates.
 aur=0
 for h in yay paru; do
   if command -v "$h" >/dev/null 2>&1; then
-    aur=$("$h" -Qua 2>/dev/null | grep -c . || true)
+    aur=$(timeout 30 "$h" -Qua 2>/dev/null | grep -c . || true)
     break
   fi
 done

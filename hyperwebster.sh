@@ -2562,9 +2562,18 @@ as_user hyperwebster-omarchy-extras-toggle enable >/dev/null 2>&1 || true
 # --- change 25 (cont.): seed the Additions status cache so the page has data
 # on first open (all 15 items not-installed on a fresh image — the page IS the
 # opt-in). Needs as_user, hence here rather than next to the QML patch.
-as_user "$USER_HOME/.local/bin/hyperwebster-additions" status >/dev/null 2>&1 \
+# Bound these: hyperwebster-update-check runs checkupdates/yay which hang for
+# minutes offline when mirrors are unreachable (looks like a stuck install).
+echo "==> Seeding Additions / Updates status caches..."
+timeout 60 arch-chroot /mnt runuser -u "$USERNAME" -- \
+  env HOME="$USER_HOME" XDG_STATE_HOME="$USER_HOME/.local/state" \
+      XDG_CONFIG_HOME="$USER_HOME/.config" XDG_CACHE_HOME="$USER_HOME/.cache" \
+  "$USER_HOME/.local/bin/hyperwebster-additions" status >/dev/null 2>&1 \
   || echo "    (Additions status seed failed — run: hyperwebster-additions status)"
-as_user "$USER_HOME/.local/bin/hyperwebster-update-check" >/dev/null 2>&1 \
+timeout 45 arch-chroot /mnt runuser -u "$USERNAME" -- \
+  env HOME="$USER_HOME" XDG_STATE_HOME="$USER_HOME/.local/state" \
+      XDG_CONFIG_HOME="$USER_HOME/.config" XDG_CACHE_HOME="$USER_HOME/.cache" \
+  "$USER_HOME/.local/bin/hyperwebster-update-check" >/dev/null 2>&1 \
   || echo "    (Updates status seed failed — run: hyperwebster-update-check)"
 
 arch-chroot /mnt chown -R "$USERNAME:$USERNAME" "$USER_HOME/.local/state" 2>/dev/null || true
