@@ -19,6 +19,16 @@
       "disable": "hyperwebster-blur-toggle disable"
     },
     {
+      "id": "caelestia-repair",
+      "kind": "install",
+      "category": "appearance",
+      "name": "Repair shell colours / config",
+      "desc": "Reset caelestia to HyperWebster dark glass defaults (backs up first)",
+      "icon": "build",
+      "check": "command -v hyperwebster-caelestia-repair",
+      "install": "sh \"$HOME/.local/share/hyperwebster/caelestia-repair/install-caelestia-repair.sh\" && hyperwebster-caelestia-repair"
+    },
+    {
       "id": "rounding",
       "kind": "toggle",
       "category": "appearance",

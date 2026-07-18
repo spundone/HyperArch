@@ -1,0 +1,9 @@
+{
+  "appearance": {
+    "rounding": { "extraSmall": 0, "small": 0, "medium": 0, "large": 0, "largeIncreased": 0, "extraLarge": 0, "extraLargeIncreased": 0, "extraExtraLarge": 0 },
+    "spacing": { "extraSmall": 3, "small": 6, "medium": 9, "large": 13, "largeIncreased": 16, "extraLarge": 22, "extraLargeIncreased": 26, "extraExtraLarge": 38 },
+    "padding": { "extraSmall": 3, "small": 6, "medium": 9, "large": 13, "largeIncreased": 16, "extraLarge": 22, "extraLargeIncreased": 26, "extraExtraLarge": 38 },
+    "fontSize": { "small": 10, "smaller": 11, "normal": 12, "larger": 14, "large": 16, "extraLarge": 24 },
+    "animDurations": { "small": 80, "normal": 130, "large": 210, "extraLarge": 300, "expressiveFastSpatial": 130, "expressiveDefaultSpatial": 200, "expressiveSlowSpatial": 280, "expressiveFastEffects": 70, "expressiveDefaultEffects": 110, "expressiveSlowEffects": 160 }
+  }
+}
