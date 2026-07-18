@@ -101,6 +101,7 @@ done
 [ -d "$SRC/distro-tools" ] && hw_cp "$SRC/distro-tools" "$DEST/"
 [ -d "$SRC/input-remap" ] && hw_cp "$SRC/input-remap" "$DEST/"
 [ -d "$SRC/omarchy-themes" ] && hw_cp "$SRC/omarchy-themes" "$DEST/"
+[ -d "$SRC/lockscreen-polish" ] && hw_cp "$SRC/lockscreen-polish" "$DEST/"
 [ -d "$SRC/shell-branding" ] && hw_cp "$SRC/shell-branding" "$DEST/"
 [ -d "$SRC/update-alias" ] && hw_cp "$SRC/update-alias" "$DEST/"
 

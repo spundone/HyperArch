@@ -155,6 +155,16 @@
       "install": "sh \"$HOME/.local/share/hyperwebster/omarchy-themes/install-omarchy-themes.sh\""
     },
     {
+      "id": "lockscreen-polish",
+      "kind": "install",
+      "category": "appearance",
+      "name": "Frosted lock screen",
+      "desc": "Wallpaper blur, ambient motion, Starman mark on lock",
+      "icon": "lock",
+      "check": "grep -q 'HyperWebster lock surface' /etc/xdg/quickshell/caelestia/modules/lock/LockSurface.qml 2>/dev/null",
+      "install": "sh \"$HOME/.local/share/hyperwebster/lockscreen-polish/install-lockscreen-polish.sh\""
+    },
+    {
       "id": "iphone-tether",
       "kind": "toggle",
       "category": "system",
