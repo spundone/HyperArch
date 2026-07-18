@@ -1,11 +1,14 @@
-#!/bin/sh
+#!/bin/bash
 # simplify-limine-menu.sh — shrink Limine to desktop UKI + Starman (+ Snapshots).
 # Idempotent. REQUIRES ROOT. Backs up limine.conf and /etc/default/limine first.
 #
 # Drops manual protocol:linux fallbacks, nested auto OS clutter drivers
 # (ENABLE_LIMINE_FALLBACK / FIND_BOOTLOADERS), and rewrites the menu seed so
 # limine-entry-tool targets the desktop entry via machine-id comment.
-set -eu
+#
+# Do NOT `source` /etc/default/limine — it uses bash array syntax that can abort
+# a POSIX `sh` invocation and break hyperwebster-update migrations.
+set -euo pipefail
 
 ESP_PATH=/boot
 UKI_NAME=hyperwebster
@@ -13,18 +16,43 @@ DEFAULTS=/etc/default/limine
 
 [ "$(id -u)" -eq 0 ] || { echo "must run as root" >&2; exit 1; }
 
-[ -r "$DEFAULTS" ] && . "$DEFAULTS" 2>/dev/null || true
+# Parse limine defaults without sourcing (array += lines are not safe to .).
+if [ -f "$DEFAULTS" ]; then
+  esp_line=$(grep -E '^ESP_PATH=' "$DEFAULTS" | head -1 || true)
+  if [ -n "$esp_line" ]; then
+    ESP_PATH=${esp_line#ESP_PATH=}
+    ESP_PATH=${ESP_PATH#\"}
+    ESP_PATH=${ESP_PATH%\"}
+  fi
+  uki_line=$(grep -E '^CUSTOM_UKI_NAME=' "$DEFAULTS" | head -1 || true)
+  if [ -n "$uki_line" ]; then
+    UKI_NAME=${uki_line#CUSTOM_UKI_NAME=}
+    UKI_NAME=${UKI_NAME#\"}
+    UKI_NAME=${UKI_NAME%\"}
+  fi
+fi
 [ -n "${ESP_PATH:-}" ] || ESP_PATH=/boot
-[ -n "${CUSTOM_UKI_NAME:-}" ] && UKI_NAME="$CUSTOM_UKI_NAME"
+[ -n "${UKI_NAME:-}" ] || UKI_NAME=hyperwebster
 
 CONF="$ESP_PATH/limine.conf"
-UKI_REL="/EFI/Linux/${UKI_NAME}_linux.efi"
-UKI_ABS="$ESP_PATH$UKI_REL"
 MACHINE_ID=$(tr -d '[:space:]' </etc/machine-id 2>/dev/null || true)
 
 [ -f "$CONF" ] || { echo "no $CONF" >&2; exit 1; }
-[ -f "$UKI_ABS" ] || { echo "UKI not found at $UKI_ABS — aborting" >&2; exit 1; }
 [ -n "$MACHINE_ID" ] || { echo "no /etc/machine-id — aborting" >&2; exit 1; }
+
+# Resolve UKI path: prefer CUSTOM_UKI_NAME, else first *_linux.efi on the ESP.
+UKI_REL="/EFI/Linux/${UKI_NAME}_linux.efi"
+UKI_ABS="$ESP_PATH$UKI_REL"
+if [ ! -f "$UKI_ABS" ]; then
+  found=$(find "$ESP_PATH/EFI/Linux" -maxdepth 1 -type f \( -name '*_linux.efi' -o -name '*_Linux.efi' \) 2>/dev/null | head -1 || true)
+  if [ -n "$found" ]; then
+    UKI_ABS=$found
+    UKI_REL=${UKI_ABS#"$ESP_PATH"}
+    echo ":: using UKI $UKI_REL"
+  else
+    echo "WARNING: no UKI under $ESP_PATH/EFI/Linux — writing menu with $UKI_REL (create UKI via limine-update)" >&2
+  fi
+fi
 
 stamp=$(date +%Y%m%d%H%M%S)
 cp -a "$CONF" "$CONF.bak.$stamp"
@@ -38,7 +66,6 @@ extract_cmdline() {
     inblk && /^[^[:space:]\/]/ { inblk=0 }
     inblk && /^[[:space:]]*cmdline:[[:space:]]*/ {
       sub(/^[[:space:]]*cmdline:[[:space:]]*/, "")
-      # Strip Starman flag if we grabbed that entry
       gsub(/[[:space:]]*hyperwebster\.starman=1/, "")
       gsub(/^[[:space:]]+|[[:space:]]+$/, "")
       print
@@ -48,16 +75,14 @@ extract_cmdline() {
   ' "$CONF"
 }
 
-CMDLINE=$(extract_cmdline)
+CMDLINE=$(extract_cmdline || true)
 if [ -z "$CMDLINE" ] && [ -f "$DEFAULTS" ]; then
-  # Fallback: first KERNEL_CMDLINE[default]+= line after the =
   CMDLINE=$(grep -E '^KERNEL_CMDLINE\[default\]\+=' "$DEFAULTS" | head -1 \
-    | sed 's/^KERNEL_CMDLINE\[default\]+=//' | sed 's/^"//;s/"$//')
+    | sed 's/^KERNEL_CMDLINE\[default\]+=//' | sed 's/^"//;s/"$//' || true)
 fi
 [ -n "$CMDLINE" ] || CMDLINE="rw quiet splash"
 
 # Quiet limine-entry-tool: no EFI-fallback menu row, no bootloader scan clutter.
-# Keep UKI + Snapshots. BOOT_ORDER drops *fallback.
 if [ -f "$DEFAULTS" ]; then
   tmp=$(mktemp)
   awk '
@@ -88,10 +113,9 @@ SNAPSHOT_FORMAT_CHOICE=5
 EOF
 fi
 
-# Preserve branding / timeout / default_entry from existing conf when present.
-TIMEOUT=$(grep -E '^timeout:' "$CONF" | head -1 | awk '{print $2}')
+TIMEOUT=$(grep -E '^timeout:' "$CONF" | head -1 | awk '{print $2}' || true)
 [ -n "$TIMEOUT" ] || TIMEOUT=10
-BRANDING=$(grep -E '^interface_branding:' "$CONF" | head -1 | sed 's/^interface_branding:[[:space:]]*//')
+BRANDING=$(grep -E '^interface_branding:' "$CONF" | head -1 | sed 's/^interface_branding:[[:space:]]*//' || true)
 [ -n "$BRANDING" ] || BRANDING="HyperWebster · hyperarch"
 
 cat > "$CONF" <<EOF
