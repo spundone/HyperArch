@@ -68,11 +68,14 @@ CONTAINER_ARGS=(
   # Keep the AUR clean-chroot off the macOS bind mount (mkarchroot needs a real
   # Linux FS for .arch-chroot / device nodes). Named volume persists across runs.
   -v hyperwebster-aur-chroot:/var/cache/hyperwebster/chroot
+  # Unsquash work tree must be case-sensitive (macOS APFS bind mounts are not).
+  -v hyperwebster-build-work:/var/cache/hyperwebster/work
   -w /build
   -e HYPERWEBSTER_BUILD_UID="$BUILD_UID"
   -e HYPERWEBSTER_BUILD_GID="$BUILD_GID"
   -e HYPERWEBSTER_BUILD_USER="$BUILD_USER"
   -e HYPERWEBSTER_CHROOT=/var/cache/hyperwebster/chroot
+  -e HYPERWEBSTER_WORK=/var/cache/hyperwebster/work
 )
 
 # Allocate a TTY when stdin is a terminal (skip in CI / non-interactive).

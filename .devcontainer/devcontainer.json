@@ -13,13 +13,15 @@
     "--privileged",
     "--cap-add=SYS_ADMIN",
     "--security-opt=seccomp=unconfined",
-    "--mount=type=volume,source=hyperwebster-aur-chroot,target=/var/cache/hyperwebster/chroot"
+    "--mount=type=volume,source=hyperwebster-aur-chroot,target=/var/cache/hyperwebster/chroot",
+    "--mount=type=volume,source=hyperwebster-build-work,target=/var/cache/hyperwebster/work"
   ],
   "containerEnv": {
     "HYPERWEBSTER_BUILD_UID": "${localEnv:UID}",
     "HYPERWEBSTER_BUILD_GID": "${localEnv:GID}",
     "HYPERWEBSTER_BUILD_USER": "${localEnv:USER}",
-    "HYPERWEBSTER_CHROOT": "/var/cache/hyperwebster/chroot"
+    "HYPERWEBSTER_CHROOT": "/var/cache/hyperwebster/chroot",
+    "HYPERWEBSTER_WORK": "/var/cache/hyperwebster/work"
   },
   "postCreateCommand": "chmod +x build.sh hyperwebster.sh scripts/*.sh || true",
   "customizations": {

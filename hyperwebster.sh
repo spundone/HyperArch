@@ -52,8 +52,17 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORK="$SCRIPT_DIR/work"
 OFFLINE="$SCRIPT_DIR/offline"
+# Unsquash/work tree must be case-sensitive. macOS bind mounts (virtiofs) are
+# not — unsquashfs dies on collisions like xt_connmark.h vs xt_CONNMARK.h.
+# Container builds use a Docker volume; override with HYPERWEBSTER_WORK.
+if [ -n "${HYPERWEBSTER_WORK:-}" ]; then
+  WORK="$HYPERWEBSTER_WORK"
+elif [ -n "${HYPERWEBSTER_BUILD_UID:-}" ]; then
+  WORK="/var/cache/hyperwebster/work"
+else
+  WORK="$SCRIPT_DIR/work"
+fi
 # Prefer container-forwarded identity so ISO ownership matches the host user
 # (OrbStack / Docker Desktop / WSL bind mounts).
 if [ -n "${HYPERWEBSTER_BUILD_UID:-}" ] && [ -n "${HYPERWEBSTER_BUILD_GID:-}" ]; then
@@ -2989,7 +2998,12 @@ xorriso -osirrox on -indev "$STOCK_ISO" \
   -extract /arch/x86_64/airootfs.sfs "$WORK/airootfs-stock.sfs" 2>&1 | tail -3
 
 echo "==> Unsquashing airootfs (slow: ~1 min)..."
-sudo unsquashfs -d "$SFS_DIR" "$WORK/airootfs-stock.sfs" >/dev/null
+if [ "$WORK" != "$SCRIPT_DIR/work" ]; then
+  echo "    work tree: $WORK (case-sensitive volume)"
+fi
+# -no-xattrs: bind mounts often reject security.capability; Linux volumes are
+# fine either way. Case-sensitive WORK is what avoids the fatal name collision.
+sudo unsquashfs -no-xattrs -d "$SFS_DIR" "$WORK/airootfs-stock.sfs" >/dev/null
 
 echo "==> Installing live-environment packages (Omarchy-style installer UI)..."
 sudo pacman -r "$SFS_DIR" -Sy --noconfirm \
