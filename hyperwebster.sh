@@ -68,6 +68,19 @@ fi
 INVOKING_GROUP="$(id -gn "$INVOKING_USER" 2>/dev/null || echo "$INVOKING_USER")"
 OUT_ISO="$SCRIPT_DIR/hyperwebster-arch-$(date +%Y%m%d).iso"
 
+# AUR clean-chroot (devtools). Must support device nodes + .arch-chroot markers.
+# On macOS OrbStack/Docker bind mounts (virtiofs), mkarchroot fails with
+# "Permission denied" writing offline/chroot/root/.arch-chroot. Use a
+# container-local path when build-in-container.sh sets HYPERWEBSTER_BUILD_UID,
+# or override with HYPERWEBSTER_CHROOT.
+if [ -n "${HYPERWEBSTER_CHROOT:-}" ]; then
+  CHROOT_DIR="$HYPERWEBSTER_CHROOT"
+elif [ -n "${HYPERWEBSTER_BUILD_UID:-}" ]; then
+  CHROOT_DIR="/var/cache/hyperwebster/chroot"
+else
+  CHROOT_DIR="$OFFLINE/chroot"
+fi
+
 # ---------------------------------------------------------------- pins ------
 # The validated combination (VM-certified): caelestia dotfiles + the AUR
 # release PKGBUILDs current at that commit, quickshell pinned to the commit
@@ -275,7 +288,7 @@ run_as_makepkg_user() {
 # Include /etc/pacman.d/mirrorlist (not a host path) — arch-nspawn cannot read
 # $OFFLINE/build-mirrorlist unless that path is bind-mounted.
 sync_mirrorlist_into_chroot() {
-  local root="$OFFLINE/chroot/root"
+  local root="$CHROOT_DIR/root"
   [ -d "$root" ] || return 0
   [ -s "$BUILD_MIRRORLIST" ] || return 0
   sudo mkdir -p "$root/etc/pacman.d"
@@ -2696,6 +2709,12 @@ build_offline_payload() {
   # path like $OFFLINE/build-mirrorlist works for host-side pacman during
   # mkarchroot, but fails inside arch-nspawn ("config file ... could not be
   # read"). Ranked mirrors are copied into the chroot by sync_mirrorlist_into_chroot.
+  #
+  # CHROOT_DIR may be outside ./offline (container-local) when the repo is on a
+  # macOS bind mount — mkarchroot cannot write .arch-chroot there.
+  if [ "$CHROOT_DIR" != "$OFFLINE/chroot" ]; then
+    echo "==> AUR build chroot: $CHROOT_DIR (not on bind mount)"
+  fi
   cat > "$OFFLINE/chroot-pacman.conf" <<CHROOTPAC
 [options]
 Architecture = auto
@@ -2717,9 +2736,9 @@ Include = /etc/pacman.d/mirrorlist
 [multilib]
 Include = /etc/pacman.d/mirrorlist
 CHROOTPAC
-  if [ ! -d "$OFFLINE/chroot/root" ]; then
+  if [ ! -d "$CHROOT_DIR/root" ]; then
     echo "==> Creating clean build chroot (devtools mkarchroot)..."
-    mkdir -p "$OFFLINE/chroot"
+    sudo mkdir -p "$CHROOT_DIR"
     # Host-side bootstrap still uses the ranked BUILD_MIRRORLIST path.
     cat > "$OFFLINE/chroot-pacman-host.conf" <<CHROOTHOST
 [options]
@@ -2742,12 +2761,12 @@ Include = $BUILD_MIRRORLIST
 [multilib]
 Include = $BUILD_MIRRORLIST
 CHROOTHOST
-    sudo mkarchroot -C "$OFFLINE/chroot-pacman-host.conf" "$OFFLINE/chroot/root" base-devel
+    sudo mkarchroot -C "$OFFLINE/chroot-pacman-host.conf" "$CHROOT_DIR/root" base-devel
   fi
   # Install in-chroot mirrorlist + rewrite pacman.conf Include for nspawn.
   sync_mirrorlist_into_chroot
-  if [ -f "$OFFLINE/chroot/root/etc/pacman.conf" ]; then
-    sudo cp "$OFFLINE/chroot-pacman.conf" "$OFFLINE/chroot/root/etc/pacman.conf"
+  if [ -f "$CHROOT_DIR/root/etc/pacman.conf" ]; then
+    sudo cp "$OFFLINE/chroot-pacman.conf" "$CHROOT_DIR/root/etc/pacman.conf"
   fi
 
   # ---- AUR packages (clean-chroot builds, dependency order) ----------------
@@ -2810,16 +2829,16 @@ CHROOTHOST
     # (hyprOS -> hyperwebster) leaves a stale Server path baked into the chroot's
     # persistent pacman.conf, which only bites the first chroot build after the
     # move (cached AUR pkgs skip the build). Keep it pointed at the live OFFLINE.
-    for pc in "$OFFLINE"/chroot/*/etc/pacman.conf; do
+    for pc in "$CHROOT_DIR"/*/etc/pacman.conf; do
       [ -f "$pc" ] && sudo sed -i "s#file:///.*/offline/iso/repo#file://$OFFLINE/iso/repo#g" "$pc"
     done
     # Refresh the ROOT chroot's sync dbs first: makechrootpkg -c clones the
     # copy from root, and the dependency install inside runs withOUT -Sy — so
     # without this, packages repo-added to [hyperwebster] after mkarchroot are
     # invisible and chained builds fail with "target not found".
-    sudo arch-nspawn "$OFFLINE/chroot/root" pacman -Syu --noconfirm
+    sudo arch-nspawn "$CHROOT_DIR/root" pacman -Syu --noconfirm
     # makechrootpkg must run as a non-root user (it sudoes internally).
-    run_as_makepkg_user "$OFFLINE/aur/$name" makechrootpkg -c -r "$OFFLINE/chroot"
+    run_as_makepkg_user "$OFFLINE/aur/$name" makechrootpkg -c -r "$CHROOT_DIR"
     for p in "$OFFLINE/aur/$name"/*.pkg.tar.zst; do
       [[ "$(basename "$p")" == *-debug-* ]] && continue
       cp -f "$p" "$OFFLINE/iso/repo/"

@@ -12,12 +12,14 @@
     "--platform=linux/amd64",
     "--privileged",
     "--cap-add=SYS_ADMIN",
-    "--security-opt=seccomp=unconfined"
+    "--security-opt=seccomp=unconfined",
+    "--mount=type=volume,source=hyperwebster-aur-chroot,target=/var/cache/hyperwebster/chroot"
   ],
   "containerEnv": {
     "HYPERWEBSTER_BUILD_UID": "${localEnv:UID}",
     "HYPERWEBSTER_BUILD_GID": "${localEnv:GID}",
-    "HYPERWEBSTER_BUILD_USER": "${localEnv:USER}"
+    "HYPERWEBSTER_BUILD_USER": "${localEnv:USER}",
+    "HYPERWEBSTER_CHROOT": "/var/cache/hyperwebster/chroot"
   },
   "postCreateCommand": "chmod +x build.sh hyperwebster.sh scripts/*.sh || true",
   "customizations": {

@@ -65,10 +65,14 @@ CONTAINER_ARGS=(
   --cap-add SYS_ADMIN
   --security-opt seccomp=unconfined
   -v "$SCRIPT_DIR:/build"
+  # Keep the AUR clean-chroot off the macOS bind mount (mkarchroot needs a real
+  # Linux FS for .arch-chroot / device nodes). Named volume persists across runs.
+  -v hyperwebster-aur-chroot:/var/cache/hyperwebster/chroot
   -w /build
   -e HYPERWEBSTER_BUILD_UID="$BUILD_UID"
   -e HYPERWEBSTER_BUILD_GID="$BUILD_GID"
   -e HYPERWEBSTER_BUILD_USER="$BUILD_USER"
+  -e HYPERWEBSTER_CHROOT=/var/cache/hyperwebster/chroot
 )
 
 # Allocate a TTY when stdin is a terminal (skip in CI / non-interactive).
