@@ -13,7 +13,7 @@
       "category": "appearance",
       "name": "Frosted glass blur",
       "desc": "Raycast-style frosted shell panels and launcher",
-      "icon": "blur_on",
+      "icon": "filter_b_and_w",
       "check": "hyperwebster-blur-toggle status",
       "enable": "hyperwebster-blur-toggle enable",
       "disable": "hyperwebster-blur-toggle disable"
@@ -24,7 +24,7 @@
       "category": "appearance",
       "name": "Rounded corners",
       "desc": "Caelestia-style rounding on shell and windows",
-      "icon": "rounded_corner",
+      "icon": "web_asset",
       "check": "hyperwebster-rounding-toggle status",
       "enable": "hyperwebster-rounding-toggle enable",
       "disable": "hyperwebster-rounding-toggle disable"
@@ -35,7 +35,7 @@
       "category": "appearance",
       "name": "Zephyr motion polish",
       "desc": "Overshoot flair on shell animations (off by default)",
-      "icon": "animation",
+      "icon": "shuffle",
       "check": "hyperwebster-zephyr-polish status",
       "enable": "hyperwebster-zephyr-polish enable",
       "disable": "hyperwebster-zephyr-polish disable"
@@ -46,7 +46,7 @@
       "category": "appearance",
       "name": "Hypersmooth 120/144 Hz",
       "desc": "VFR + snappier shell animation durations",
-      "icon": "speed",
+      "icon": "bolt",
       "check": "hyperwebster-hypersmooth-toggle status",
       "enable": "hyperwebster-hypersmooth-toggle enable",
       "disable": "hyperwebster-hypersmooth-toggle disable"
@@ -78,7 +78,7 @@
       "category": "gaming",
       "name": "Deckify / Chimera Gaming",
       "desc": "ChimeraOS gamescope session — Starman boot path (Super+Shift+S)",
-      "icon": "stadia_controller",
+      "icon": "gamepad",
       "check": "test -x /usr/local/bin/hyperwebster-deckify-install && /usr/local/bin/hyperwebster-gaming-session >/dev/null 2>&1",
       "install": "hyperwebster-deckify-install; sh \"$HOME/.local/share/hyperwebster/deckshift-login/install-deckshift-login.sh\""
     },
@@ -88,7 +88,7 @@
       "category": "gaming",
       "name": "4K HDR TV profile",
       "desc": "TV gaming hyprmoncfg profile + HDR/VRR hints",
-      "icon": "tv",
+      "icon": "monitor",
       "check": "hyperwebster-tv-gaming-toggle status",
       "enable": "hyperwebster-tv-gaming-toggle enable",
       "disable": "hyperwebster-tv-gaming-toggle disable"
@@ -119,7 +119,7 @@
       "category": "gaming",
       "name": "Wine",
       "desc": "Windows compatibility layer for games and apps",
-      "icon": "wine_bar",
+      "icon": "coffee",
       "check": "pacman -Q wine",
       "install": "sudo pacman -S --needed --noconfirm wine wine-gecko wine-mono"
     },
@@ -140,7 +140,7 @@
       "category": "system",
       "name": "iPhone USB Tether",
       "desc": "Use iPhone internet over USB (omatether TUI)",
-      "icon": "phone_iphone",
+      "icon": "smartphone",
       "check": "test -f /etc/systemd/network/10-iphone-tether.network && command -v omatether >/dev/null",
       "enable": "sudo sh \"$HOME/.local/share/hyperwebster/iphone-tether/install-iphone-tether.sh\"; echo 'Then: omatether pair'",
       "disable": "sudo rm -f /etc/systemd/network/10-iphone-tether.network; sudo networkctl reload 2>/dev/null || true; echo 'omatether binary left installed; network profile removed'"
@@ -172,7 +172,7 @@
       "category": "software",
       "name": "VLC",
       "desc": "Media player for local files and streams",
-      "icon": "play_circle",
+      "icon": "play_arrow",
       "check": "pacman -Q vlc",
       "install": "sudo pacman -S --needed --noconfirm vlc"
     },

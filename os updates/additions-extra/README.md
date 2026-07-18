@@ -30,5 +30,6 @@ Replace the layer's `additions-installer/additions.json` with the bundled
 already-installed machines on `hyperwebster-update`.
 
 ## Icon note
-`kdenlive` uses `movie_edit` and `pi` uses `robot_2` - newer Material Symbols.
-If the shipped icon font is older, fall back to `movie` and `smart_toy`.
+Icons are Material Symbol **names** looked up in nosignal-shell `Glyphs.qml`
+(Nerd Font codepoints). Prefer names already in that map (`movie_edit`,
+`robot_2`, `sports_esports`, …). Unmapped names show as `?` in Settings.

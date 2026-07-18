@@ -11,13 +11,27 @@ MARK_BEGIN='# >>> hyperwebster-omarchy-launcher >>>'
 MARK_END='# <<< hyperwebster-omarchy-launcher <<<'
 
 mkdir -p "$BIN" "$LAYER"
+
+# Layer checkout often IS ~/.local/share/hyperwebster — never install a file onto itself.
+install_if_different() {
+  src=$1 dest=$2 mode=$3
+  [ -f "$src" ] || return 0
+  src_r=$(readlink -f "$src")
+  dest_r=$(readlink -f "$dest" 2>/dev/null || true)
+  if [ -n "$dest_r" ] && [ "$src_r" = "$dest_r" ]; then
+    chmod "$mode" "$dest" 2>/dev/null || true
+    return 0
+  fi
+  install -m "$mode" "$src" "$dest"
+}
+
 for script in hyperwebster-omarchy-menu hyperwebster-pkg-install \
               hyperwebster-pkg-aur-install hyperwebster-pkg-remove \
               hyperwebster-settings; do
-  install -m 0755 "$SRC/$script" "$BIN/$script"
+  install_if_different "$SRC/$script" "$BIN/$script" 0755
 done
-install -m 0644 "$SRC/README.md" "$LAYER/README.md"
-install -m 0644 "$SRC/omarchy-launcher-keys.conf" "$LAYER/omarchy-launcher-keys.conf"
+install_if_different "$SRC/README.md" "$LAYER/README.md" 0644
+install_if_different "$SRC/omarchy-launcher-keys.conf" "$LAYER/omarchy-launcher-keys.conf" 0644
 echo ":: installed omarchy-launcher scripts -> $BIN"
 
 # Keep F10 / Settings bind pointing at the working opener (not bare `caelestia nexus`).

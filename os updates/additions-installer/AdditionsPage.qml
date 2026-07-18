@@ -9,7 +9,9 @@ import qs.services
 import qs.modules.nexus.common
 
 // HyperWebster: Settings → Additions — layer mod toggles + optional software.
-// Manifest-driven via hyperwebster-additions status cache (sections by category).
+// Status cache exposes per-section `toggles` and `installs` arrays so each
+// kind uses the correct row type (ToggleRow vs NavRow). Mixing kinds in one
+// Repeater left every row as NavRow (chevrons) and install() failed on toggles.
 PageBase {
     id: root
 
@@ -75,6 +77,10 @@ PageBase {
                 required property var modelData
                 required property int index
 
+                readonly property var toggleItems: modelData.toggles || []
+                readonly property var installItems: modelData.installs || []
+
+                Layout.fillWidth: true
                 spacing: Tokens.spacing.extraSmall / 2
 
                 SectionHeader {
@@ -82,54 +88,45 @@ PageBase {
                 }
 
                 Repeater {
-                    model: sectionBlock.modelData.items || []
+                    model: sectionBlock.toggleItems
 
-                    delegate: Loader {
-                        id: rowLoader
-
+                    ToggleRow {
                         required property var modelData
                         required property int index
 
-                        readonly property var items: sectionBlock.modelData.items || []
-                        readonly property bool isToggle: (modelData.kind || "install") === "toggle"
-                        readonly property bool isFirst: index === 0
-                        readonly property bool isLast: index === items.length - 1
-
-                        width: parent ? parent.width : implicitWidth
-                        sourceComponent: isToggle ? toggleRowComp : installRowComp
-
-                        Component {
-                            id: toggleRowComp
-
-                            ToggleRow {
-                                text: rowLoader.modelData.name || ""
-                                subtext: rowLoader.modelData.desc || ""
-                                checked: rowLoader.modelData.enabled === true
-                                onToggled: {
-                                    if (toggleProc.running)
-                                        return;
-                                    toggleProc.addId = rowLoader.modelData.id;
-                                    toggleProc.turnOn = checked;
-                                    toggleProc.running = true;
-                                }
-                            }
+                        Layout.fillWidth: true
+                        first: index === 0
+                        last: index === sectionBlock.toggleItems.length - 1
+                        text: modelData.name || ""
+                        subtext: modelData.desc || ""
+                        checked: modelData.enabled === true
+                        onToggled: {
+                            if (toggleProc.running)
+                                return;
+                            toggleProc.addId = modelData.id;
+                            toggleProc.turnOn = checked;
+                            toggleProc.running = true;
                         }
+                    }
+                }
 
-                        Component {
-                            id: installRowComp
+                Repeater {
+                    model: sectionBlock.installItems
 
-                            NavRow {
-                                first: rowLoader.isFirst
-                                last: rowLoader.isLast
-                                icon: rowLoader.modelData.icon || "extension"
-                                label: rowLoader.modelData.name || ""
-                                status: rowLoader.modelData.installed ? qsTr("Installed") : (rowLoader.modelData.desc || "")
-                                onClicked: {
-                                    if (!rowLoader.modelData.installed && !installProc.running) {
-                                        installProc.addId = rowLoader.modelData.id;
-                                        installProc.running = true;
-                                    }
-                                }
+                    NavRow {
+                        required property var modelData
+                        required property int index
+
+                        Layout.fillWidth: true
+                        first: index === 0
+                        last: index === sectionBlock.installItems.length - 1
+                        icon: modelData.icon || "extension"
+                        label: modelData.name || ""
+                        status: modelData.installed ? qsTr("Installed") : (modelData.desc || "")
+                        onClicked: {
+                            if (!modelData.installed && !installProc.running) {
+                                installProc.addId = modelData.id;
+                                installProc.running = true;
                             }
                         }
                     }

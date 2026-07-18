@@ -14,15 +14,29 @@ SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BIN="$HOME/.local/bin"
 SHARE="$HOME/.local/share/hyperwebster/additions-installer"
 
+# HYPERWEBSTER_SRC is often already ~/.local/share/hyperwebster — never
+# install a file onto itself (GNU install errors and aborts with set -e).
+install_if_different() {
+  src=$1 dest=$2 mode=$3
+  [ -f "$src" ] || return 0
+  src_r=$(readlink -f "$src")
+  dest_r=$(readlink -f "$dest" 2>/dev/null || true)
+  if [ -n "$dest_r" ] && [ "$src_r" = "$dest_r" ]; then
+    chmod "$mode" "$dest" 2>/dev/null || true
+    return 0
+  fi
+  install -m "$mode" "$src" "$dest"
+}
+
 # 1. Backend + manifest.
 mkdir -p "$BIN" "$SHARE"
-install -m 0755 "$SRC/hyperwebster-additions" "$BIN/hyperwebster-additions"
-install -m 0644 "$SRC/additions.json" "$SHARE/additions.json"
-install -m 0755 "$SRC/obs-extras.sh" "$SHARE/obs-extras.sh"
+install_if_different "$SRC/hyperwebster-additions" "$BIN/hyperwebster-additions" 0755
+install_if_different "$SRC/additions.json" "$SHARE/additions.json" 0644
+install_if_different "$SRC/obs-extras.sh" "$SHARE/obs-extras.sh" 0755
 
 # 2. Stable on-system copies for the pacman hook to point at.
-install -m 0644 "$SRC/AdditionsPage.qml" "$SHARE/AdditionsPage.qml"
-install -m 0755 "$SRC/patch-additions-page.sh" "$SHARE/patch-additions-page.sh"
+install_if_different "$SRC/AdditionsPage.qml" "$SHARE/AdditionsPage.qml" 0644
+install_if_different "$SRC/patch-additions-page.sh" "$SHARE/patch-additions-page.sh" 0755
 
 # 3. QML registration — skipped when the ISO builder already branded nosignal-shell,
 # but the pacman hook is always installed so a later shell upgrade re-applies the page.

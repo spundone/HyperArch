@@ -40,9 +40,10 @@ completes the set idempotently.
 ## How it works (same mechanism as the Updates page)
 
 - **`additions.json`** - the manifest, single source of truth. Per item:
-  `id`, `name`, `desc`, `icon` (Material Symbol), `check` (sh, exit 0 =
-  installed), `install` (sh). Edit this file to add/remove items - no
-  code changes needed.
+  `id`, `name`, `desc`, `icon` (Material Symbol **name** mapped through
+  nosignal-shell `Glyphs.qml` → Nerd Font; unmapped names render as `?`),
+  `check` (sh, exit 0 = installed), `install` (sh). Edit this file to
+  add/remove items - no code changes needed.
 - **`hyperwebster-additions`** (`~/.local/bin`) - `status` re-runs every check
   and writes `~/.local/state/hyperwebster/additions-status.json`;
   `install <id>` runs the item's installer then re-statuses;` list`.
