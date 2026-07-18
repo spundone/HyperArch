@@ -1,6 +1,6 @@
 [Plymouth Theme]
 Name=HyperWebster
-Description=HyperWebster Starman astronaut boot splash
+Description=HyperWebster Starman unlock splash (TV-readable passphrase UX)
 ModuleName=script
 
 [script]

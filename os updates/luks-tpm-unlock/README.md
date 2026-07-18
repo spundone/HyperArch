@@ -89,3 +89,9 @@ After any enrollment or hook change, `hyperwebster-luks-tpm-enroll` rebuilds the
 | `hyperwebster-luks-tpm-status` | Boot-chain diagnostics |
 | `install-luks-tpm-unlock.sh` | Idempotent installer + Plymouth/hook fixes |
 | `plymouth/hyperwebster.script` | Graphical LUKS passphrase on the Starman splash |
+
+## Plymouth unlock splash
+
+Starman-branded passphrase dialog (scaled for TV). Theme lives in
+`assets/plymouth/hyperwebster/` (ISO) and is refreshed here via
+`install-luks-tpm-unlock.sh` / `hyperwebster-update`.
