@@ -170,11 +170,25 @@ run_migrations_once() {
       continue
     fi
     log "migration: $base"
-    if HYPERWEBSTER_SRC="$ROOT" HYPERWEBSTER_LAYER="$ROOT" bash "$m"; then
+    mig_log=$(mktemp)
+    set +e
+    HYPERWEBSTER_SRC="$ROOT" HYPERWEBSTER_LAYER="$ROOT" bash "$m" >"$mig_log" 2>&1
+    rc=$?
+    set -e
+    cat "$mig_log"
+    if [ "$rc" -eq 0 ]; then
+      rm -f "$mig_log"
+      grep -qxF "$base" "$STATE" 2>/dev/null || echo "$base" >> "$STATE"
+      applied=$((applied + 1))
+    elif grep -q 'are the same file' "$mig_log" 2>/dev/null; then
+      # Live layer: installers sometimes cp/install a file onto itself. Treat as
+      # already-applied so one stale component cannot block the rest.
+      warn "migration $base: same-file install (already on layer) — continuing"
+      rm -f "$mig_log"
       grep -qxF "$base" "$STATE" 2>/dev/null || echo "$base" >> "$STATE"
       applied=$((applied + 1))
     else
-      rc=$?
+      rm -f "$mig_log"
       warn "migration $base FAILED (exit $rc)"
       return 1
     fi
