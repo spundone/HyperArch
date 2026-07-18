@@ -231,8 +231,9 @@ CLI: `hyperwebster-omarchy-menu`, `hyperwebster-pkg-install`, `hyperwebster-pkg-
 | `Super+Ctrl+Shift+M` | Maintenance menu (`hyperwebster-maint`) |
 | `Super+Ctrl+Shift+B` | Btrfs / Snapper shortcuts (`hyperwebster-snapshots`) |
 | `Super+Ctrl+I` | Input remap TUI - keyboard & mouse buttons (`hyperwebster-input-remap` / keyd) |
+| `Super+Ctrl+Shift+Space` | Theme picker TUI (`hyperwebster-theme` — Omarchy packs + wallpaper gen) |
 
-CLI: `hyperwebster-maint`, `hyperwebster-input-remap`, `btrfs-assistant`, `hyperwebster-zephyr-polish {enable|disable}`.
+CLI: `hyperwebster-maint`, `hyperwebster-input-remap`, `hyperwebster-theme`, `btrfs-assistant`, `hyperwebster-zephyr-polish {enable|disable}`.
 
 ## 13. Power
 

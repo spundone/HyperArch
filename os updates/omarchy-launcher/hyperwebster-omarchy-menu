@@ -136,6 +136,7 @@ Editor
 Browser
 Gaming
 Apps & services
+Theme (Omarchy pack)
 Quick picks
 Open Shelly app store") in
     "Package (official repos)") terminal hyperwebster-pkg-install ;;
@@ -147,6 +148,7 @@ Open Shelly app store") in
     Browser) show_install_browser_menu ;;
     Gaming) show_install_gaming_menu ;;
     "Apps & services") show_install_service_menu ;;
+    "Theme (Omarchy pack)") terminal hyperwebster-theme install ;;
     "Quick picks") show_install_quick_menu ;;
     "Open Shelly app store")
       command -v shelly-ui >/dev/null 2>&1 && exec shelly-ui || \
@@ -159,11 +161,29 @@ Open Shelly app store") in
 show_remove_menu() {
   case $(menu "Remove" \
     "Package (installed)
-Web app") in
+Web app
+Theme (community)") in
     "Package (installed)") terminal hyperwebster-pkg-remove ;;
     "Web app")
       terminal 'read -rp "Web app name to remove: " n; hyperwebster-webapp-remove "$n"'
       ;;
+    "Theme (community)") terminal hyperwebster-theme remove ;;
+    *) show_main_menu ;;
+  esac
+}
+
+show_style_menu() {
+  case $(menu "Style" \
+    "Theme picker
+Generate from wallpaper
+Update community themes
+Colours settings
+Browse extra themes") in
+    "Theme picker") terminal hyperwebster-theme ;;
+    "Generate from wallpaper") terminal 'hyperwebster-theme generate; printf "\nPress Enter..."; read _' ;;
+    "Update community themes") terminal 'hyperwebster-theme update; printf "\nPress Enter..."; read _' ;;
+    "Colours settings") exec hyperwebster-settings ;;
+    "Browse extra themes") exec xdg-open "https://learn.omacom.io/2/the-omarchy-manual/90/extra-themes" ;;
     *) show_main_menu ;;
   esac
 }
@@ -190,6 +210,7 @@ show_main_menu() {
   case $(menu "Go" \
     "Install
 Remove
+Style
 App store (Shelly)
 Settings
 Maintenance
@@ -197,6 +218,7 @@ Keybindings
 Learn") in
     Install) show_install_menu ;;
     Remove) show_remove_menu ;;
+    Style) show_style_menu ;;
     "App store (Shelly)")
       command -v shelly-ui >/dev/null 2>&1 && exec shelly-ui || \
         show_install_menu

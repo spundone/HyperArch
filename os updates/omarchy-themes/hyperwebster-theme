@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+# hyperwebster-theme — Omarchy-style theme install / switch / generate for HyperWebster.
+# Converts Omarchy theme packs (colors.toml) into caelestia schemes and applies them.
+set -euo pipefail
+
+LAYER="${HOME}/.local/share/hyperwebster/omarchy-themes"
+USER_SCHEMES="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/schemes"
+OMARCHY_THEMES="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/themes"
+CONV="$LAYER/lib/omarchy-to-caelestia.py"
+[ -f "$CONV" ] || CONV="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/lib/omarchy-to-caelestia.py"
+
+CYAN=$'\033[38;5;81m'
+DIM=$'\033[2m'
+RST=$'\033[0m'
+BOLD=$'\033[1m'
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+slug_from_url() {
+  local base name
+  base=$(basename "${1%/}")
+  name=${base%.git}
+  name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+  name=${name#omarchy-}
+  name=${name%-theme}
+  printf '%s' "$name"
+}
+
+ensure_dirs() {
+  mkdir -p "$USER_SCHEMES" "$OMARCHY_THEMES"
+}
+
+install_bundled() {
+  ensure_dirs
+  local src="$LAYER/schemes"
+  [ -d "$src" ] || src="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/schemes"
+  [ -d "$src" ] || die "bundled schemes missing"
+  local d
+  for d in "$src"/*; do
+    [ -d "$d" ] || continue
+    cp -a "$d" "$USER_SCHEMES/"
+  done
+  say "Installed bundled Omarchy schemes into $USER_SCHEMES"
+}
+
+convert_pack() {
+  local pack=$1 name=${2:-}
+  local toml="$pack/colors.toml"
+  [ -f "$toml" ] || die "no colors.toml in $pack (not an Omarchy theme pack?)"
+  if [ -z "$name" ]; then
+    name=$(basename "$pack" | tr '[:upper:]' '[:lower:]')
+    name=${name#omarchy-}
+    name=${name%-theme}
+  fi
+  ensure_dirs
+  python3 "$CONV" "$toml" -o "$USER_SCHEMES" -n "$name"
+  # Keep Omarchy layout for updates / community tooling
+  mkdir -p "$OMARCHY_THEMES"
+  if [ "$(readlink -f "$pack" 2>/dev/null || echo "$pack")" != "$(readlink -f "$OMARCHY_THEMES/$name" 2>/dev/null || true)" ]; then
+    rm -rf "$OMARCHY_THEMES/$name"
+    cp -a "$pack" "$OMARCHY_THEMES/$name"
+  fi
+  printf '%s' "$name"
+}
+
+cmd_install() {
+  local url=${1:-} name pack tmp
+  if [ -z "$url" ]; then
+    if command -v gum >/dev/null 2>&1; then
+      url=$(gum input --placeholder "https://github.com/org/omarchy-mytheme-theme" --prompt "Theme git URL › ") || exit 0
+    else
+      die "usage: hyperwebster-theme install <git-url|local-path>"
+    fi
+  fi
+  [ -n "$url" ] || exit 0
+  ensure_dirs
+
+  if [ -d "$url" ]; then
+    pack=$(cd "$url" && pwd)
+    name=$(convert_pack "$pack")
+  else
+    name=$(slug_from_url "$url")
+    tmp=$(mktemp -d)
+    say "Cloning $url → $name …"
+    git clone --depth 1 "$url" "$tmp/$name"
+    name=$(convert_pack "$tmp/$name" "$name")
+    rm -rf "$tmp"
+  fi
+
+  apply_scheme "$name"
+  # Optional wallpaper from pack
+  if compgen -G "$OMARCHY_THEMES/$name/backgrounds/*" >/dev/null; then
+    local wall
+    wall=$(find "$OMARCHY_THEMES/$name/backgrounds" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | head -1 || true)
+    if [ -n "${wall:-}" ] && command -v caelestia >/dev/null 2>&1; then
+      if command -v gum >/dev/null 2>&1; then
+        if gum confirm "Also set a theme wallpaper?"; then
+          caelestia wallpaper -f "$wall" --no-smart 2>/dev/null || caelestia wallpaper -f "$wall" || true
+        fi
+      else
+        caelestia wallpaper -f "$wall" --no-smart 2>/dev/null || true
+      fi
+    fi
+  fi
+  say "Installed and applied theme: $name"
+  notify-send "Theme" "Installed $name" 2>/dev/null || true
+}
+
+apply_scheme() {
+  local name=$1 flavour=${2:-default}
+  command -v caelestia >/dev/null 2>&1 || die "caelestia CLI missing"
+  if ! caelestia scheme set --notify -n "$name" -f "$flavour" 2>/dev/null; then
+    # Fallback: first flavour reported by list JSON
+    local alt
+    alt=$(caelestia scheme list 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(iter(d.get('$name',{})), 'default'))" 2>/dev/null || echo default)
+    caelestia scheme set --notify -n "$name" -f "$alt"
+  fi
+}
+
+cmd_set() {
+  local name=${1:-} flavour=${2:-default}
+  [ -n "$name" ] || die "usage: hyperwebster-theme set <name> [flavour]"
+  # Map Omarchy names → stock caelestia where helpful
+  case "$name" in
+    tokyo-night|tokyonight) name=tokyonight; flavour=${2:-medium} ;;
+    rose-pine|rosepine) name=rosepine; flavour=${2:-main} ;;
+    catppuccin-latte)
+      name=catppuccin
+      flavour=${2:-latte}
+      ;;
+  esac
+  apply_scheme "$name" "$flavour"
+  say "Applied $name ($flavour)"
+}
+
+cmd_list() {
+  ensure_dirs
+  say "${BOLD}${CYAN}Bundled Omarchy schemes${RST} ${DIM}($USER_SCHEMES)${RST}"
+  if [ -d "$USER_SCHEMES" ]; then
+    find "$USER_SCHEMES" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort || \
+      find "$USER_SCHEMES" -mindepth 1 -maxdepth 1 -type d | sed 's|.*/||' | sort
+  fi
+  echo
+  say "${BOLD}${CYAN}Community packs${RST} ${DIM}($OMARCHY_THEMES)${RST}"
+  if [ -d "$OMARCHY_THEMES" ]; then
+    find "$OMARCHY_THEMES" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort || \
+      find "$OMARCHY_THEMES" -mindepth 1 -maxdepth 1 -type d | sed 's|.*/||' | sort
+  fi
+  echo
+  if command -v caelestia >/dev/null 2>&1; then
+    say "${BOLD}${CYAN}All caelestia schemes${RST}"
+    caelestia scheme list -n 2>/dev/null || true
+  fi
+}
+
+cmd_remove() {
+  local name=${1:-}
+  if [ -z "$name" ] && command -v gum >/dev/null 2>&1; then
+    local opts=()
+    local d
+    for d in "$USER_SCHEMES"/* "$OMARCHY_THEMES"/*; do
+      [ -e "$d" ] || continue
+      opts+=("$(basename "$d")")
+    done
+    [ ${#opts[@]} -gt 0 ] || die "no custom themes installed"
+    name=$(printf '%s\n' "${opts[@]}" | sort -u | gum choose --header "Remove theme") || exit 0
+  fi
+  [ -n "$name" ] || die "usage: hyperwebster-theme remove <name>"
+  rm -rf "$USER_SCHEMES/$name" "$OMARCHY_THEMES/$name"
+  say "Removed $name"
+}
+
+cmd_update() {
+  local d
+  [ -d "$OMARCHY_THEMES" ] || { say "No community themes."; exit 0; }
+  for d in "$OMARCHY_THEMES"/*; do
+    [ -d "$d/.git" ] || continue
+    say "Updating $(basename "$d")…"
+    git -C "$d" pull --ff-only || true
+    if [ -f "$d/colors.toml" ]; then
+      convert_pack "$d" "$(basename "$d")" >/dev/null
+    fi
+  done
+  say "Done."
+}
+
+cmd_generate() {
+  local img=${1:-} name=${2:-wallpaper}
+  ensure_dirs
+  if [ -z "$img" ]; then
+    # Current wallpaper
+    img=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/caelestia/wallpaper/path.txt" 2>/dev/null || true)
+    [ -n "$img" ] && [ -f "$img" ] || die "usage: hyperwebster-theme generate <image> [name]"
+  fi
+  [ -f "$img" ] || die "image not found: $img"
+  command -v caelestia >/dev/null 2>&1 || die "caelestia CLI missing"
+
+  say "Generating theme \"$name\" from $(basename "$img")…"
+  caelestia wallpaper -f "$img" 2>/dev/null || true
+  caelestia scheme set --notify -n dynamic -f default 2>/dev/null \
+    || caelestia scheme set --notify -n dynamic || true
+
+  local scheme_json="${XDG_STATE_HOME:-$HOME/.local/state}/caelestia/scheme.json"
+  [ -f "$scheme_json" ] || die "scheme.json missing after dynamic generate"
+
+  python3 - "$scheme_json" "$USER_SCHEMES" "$name" "$img" "$OMARCHY_THEMES" <<'PY'
+import json, pathlib, shutil, sys
+scheme = json.loads(pathlib.Path(sys.argv[1]).read_text())
+out_root = pathlib.Path(sys.argv[2])
+name = sys.argv[3]
+img = pathlib.Path(sys.argv[4])
+omarchy = pathlib.Path(sys.argv[5])
+colours = scheme.get("colours") or {}
+mode = scheme.get("mode") or "dark"
+flavour = "default"
+dest = out_root / name / flavour
+dest.mkdir(parents=True, exist_ok=True)
+lines = [f"{k} {v}" for k, v in colours.items()]
+(dest / f"{mode}.txt").write_text("\n".join(lines) + "\n")
+
+# Also write a minimal Omarchy-compatible colors.toml for community reuse
+pack = omarchy / name
+(pack / "backgrounds").mkdir(parents=True, exist_ok=True)
+bg = colours.get("background", "1A1B26")
+fg = colours.get("onBackground", colours.get("onSurface", "C0CAF5"))
+accent = colours.get("primary", "7AA2F7")
+terms = [colours.get(f"term{i}", accent) for i in range(16)]
+toml = [
+    f'accent = "#{accent}"',
+    f'cursor = "#{fg}"',
+    f'foreground = "#{fg}"',
+    f'background = "#{bg}"',
+    f'selection_foreground = "#{bg}"',
+    f'selection_background = "#{accent}"',
+    "",
+]
+for i, t in enumerate(terms):
+    toml.append(f'color{i} = "#{t}"')
+(pack / "colors.toml").write_text("\n".join(toml) + "\n")
+try:
+    shutil.copy2(img, pack / "backgrounds" / img.name)
+except Exception:
+    pass
+print(f"saved scheme {out_root / name / flavour / (mode + '.txt')}")
+print(f"saved omarchy pack {pack}")
+PY
+
+  apply_scheme "$name" default
+  say "Generated and applied theme: $name"
+  notify-send "Theme" "Generated $name from wallpaper" 2>/dev/null || true
+}
+
+cmd_tui() {
+  command -v gum >/dev/null 2>&1 || die "gum required for TUI"
+  ensure_dirs
+  while true; do
+    clear 2>/dev/null || true
+    gum style --border rounded --border-foreground 6 --padding "0 2" --margin "1 0" \
+      "${BOLD}${CYAN}HyperWebster${RST}  themes" \
+      "${DIM}Omarchy packs · caelestia schemes · wallpaper gen${RST}"
+    local choice
+    choice=$(gum choose --header "Theme actions" \
+      "Pick scheme" \
+      "Install from GitHub URL" \
+      "Generate from wallpaper" \
+      "Update community themes" \
+      "Remove theme" \
+      "List themes" \
+      "Open Colours settings" \
+      "Quit") || exit 0
+    case "$choice" in
+      "Pick scheme")
+        local names
+        names=$(caelestia scheme list -n 2>/dev/null || true)
+        [ -n "$names" ] || { gum style --foreground 1 "No schemes"; sleep 1; continue; }
+        local n
+        n=$(printf '%s\n' $names | gum filter --placeholder "scheme") || continue
+        cmd_set "$n"
+        gum confirm "Continue?" >/dev/null || true
+        ;;
+      "Install from GitHub URL") cmd_install; gum confirm "Continue?" >/dev/null || true ;;
+      "Generate from wallpaper")
+        local img
+        img=$(gum input --placeholder "~/Pictures/Wallpapers/foo.jpg" --prompt "Image › ") || continue
+        # Expand ~
+        img=${img/#\~/$HOME}
+        local nm
+        nm=$(gum input --value "wallpaper" --prompt "Theme name › ") || continue
+        cmd_generate "$img" "$nm"
+        gum confirm "Continue?" >/dev/null || true
+        ;;
+      "Update community themes") cmd_update; gum confirm "Continue?" >/dev/null || true ;;
+      "Remove theme") cmd_remove; gum confirm "Continue?" >/dev/null || true ;;
+      "List themes") cmd_list; gum confirm "Continue?" >/dev/null || true ;;
+      "Open Colours settings")
+        caelestia nexus 2>/dev/null || true
+        exit 0
+        ;;
+      Quit) exit 0 ;;
+    esac
+  done
+}
+
+usage() {
+  cat <<EOF
+hyperwebster-theme — Omarchy-compatible themes for HyperWebster (caelestia)
+
+  hyperwebster-theme                 Interactive gum TUI
+  hyperwebster-theme list
+  hyperwebster-theme set <name> [flavour]
+  hyperwebster-theme install <git-url|path>
+  hyperwebster-theme remove [name]
+  hyperwebster-theme update          git-pull community packs
+  hyperwebster-theme generate [image] [name]
+  hyperwebster-theme install-bundled Seed Omarchy stock schemes
+  hyperwebster-theme help
+
+Community themes: paste any Omarchy theme repo URL (see
+https://learn.omacom.io/2/the-omarchy-manual/90/extra-themes).
+
+Wallpaper generator: builds a named scheme from an image (Material You /
+dynamic) and saves an Omarchy-compatible colors.toml pack.
+EOF
+}
+
+case "${1:-}" in
+  ""|tui|menu) cmd_tui ;;
+  list) cmd_list ;;
+  set) shift; cmd_set "$@" ;;
+  install) shift; cmd_install "$@" ;;
+  remove) shift; cmd_remove "$@" ;;
+  update) cmd_update ;;
+  generate) shift; cmd_generate "$@" ;;
+  install-bundled) install_bundled ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 1 ;;
+esac

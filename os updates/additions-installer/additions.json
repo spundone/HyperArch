@@ -145,6 +145,16 @@
       "install": "sh \"$HOME/.local/share/hyperwebster/input-remap/install-input-remap.sh\""
     },
     {
+      "id": "omarchy-themes",
+      "kind": "install",
+      "category": "appearance",
+      "name": "Omarchy themes",
+      "desc": "Extra schemes, community git themes, wallpaper generator",
+      "icon": "palette",
+      "check": "command -v hyperwebster-theme && test -d \"$HOME/.local/share/caelestia/schemes\"",
+      "install": "sh \"$HOME/.local/share/hyperwebster/omarchy-themes/install-omarchy-themes.sh\""
+    },
+    {
       "id": "iphone-tether",
       "kind": "toggle",
       "category": "system",

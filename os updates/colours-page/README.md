@@ -11,6 +11,7 @@ Settings → Wallpaper & style → Colours.
 - Dark theme and smart-scheme toggles
 - Transparency on/off plus base and layer opacity sliders
 - Sync login screen colours (`sddm-theme-sync`)
+- Omarchy themes: install community git packs, wallpaper generator, theme TUI
 
 Frosted-glass blur and window rounding stay on **Additions** (existing toggles).
 

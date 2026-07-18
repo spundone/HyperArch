@@ -197,6 +197,34 @@ PageBase {
             command: ["sh", "-c", "sudo -n /usr/local/bin/sddm-theme-sync 2>/dev/null || kitty --class TUI.float -e sh -c 'sudo /usr/local/bin/sddm-theme-sync; printf \"\\nPress Enter to close...\\n\"; read _'"]
         }
 
+        Process {
+            id: themeInstallProc
+
+            command: ["kitty", "--class", "TUI.float", "-e", "hyperwebster-theme", "install"]
+            onExited: listSchemes.running = true
+        }
+
+        Process {
+            id: themeGenerateProc
+
+            command: ["kitty", "--class", "TUI.float", "-e", "sh", "-c", "hyperwebster-theme generate; printf '\\nPress Enter to close...'; read _"]
+            onExited: listSchemes.running = true
+        }
+
+        Process {
+            id: themeTuiProc
+
+            command: ["kitty", "--class", "TUI.float", "-e", "hyperwebster-theme"]
+            onExited: listSchemes.running = true
+        }
+
+        Process {
+            id: themeUpdateProc
+
+            command: ["kitty", "--class", "TUI.float", "-e", "sh", "-c", "hyperwebster-theme update; printf '\\nPress Enter to close...'; read _"]
+            onExited: listSchemes.running = true
+        }
+
         // Live palette preview
         SectionHeader {
             first: true
@@ -379,6 +407,48 @@ PageBase {
             valueLabel: Math.round(GlobalConfig.appearance.transparency.layers * 100) + "%"
             value: GlobalConfig.appearance.transparency.layers
             onMoved: v => GlobalConfig.appearance.transparency.layers = Math.round(v * 100) / 100
+        }
+
+        // Omarchy-compatible themes
+        SectionHeader {
+            text: qsTr("Omarchy themes")
+        }
+
+        NavRow {
+            first: true
+            icon: "extension"
+            label: qsTr("Install community theme")
+            status: qsTr("Paste a GitHub URL (Omarchy extra themes)")
+            onClicked: themeInstallProc.running = true
+        }
+
+        NavRow {
+            icon: "wallpaper"
+            label: qsTr("Generate from wallpaper")
+            status: qsTr("Material You → named theme (like Omarchy Aether)")
+            onClicked: themeGenerateProc.running = true
+        }
+
+        NavRow {
+            icon: "palette"
+            label: qsTr("Theme picker TUI")
+            status: qsTr("Super+Ctrl+Shift+Space")
+            onClicked: themeTuiProc.running = true
+        }
+
+        NavRow {
+            icon: "refresh"
+            label: qsTr("Update installed community themes")
+            status: qsTr("git pull in ~/.config/omarchy/themes")
+            onClicked: themeUpdateProc.running = true
+        }
+
+        NavRow {
+            last: true
+            icon: "globe"
+            label: qsTr("Browse Omarchy extra themes")
+            status: qsTr("learn.omacom.io catalogue")
+            onClicked: Quickshell.execDetached(["xdg-open", "https://learn.omacom.io/2/the-omarchy-manual/90/extra-themes"])
         }
 
         // Login screen
