@@ -6,11 +6,15 @@
 # is actually installed; everywhere else it is a no-op. Users opt in with:
 #   sh ~/deckshift/deckshift.sh
 #   sh ~/.local/share/hyperwebster/deckshift-login/install-deckshift-login.sh
-set -euo pipefail
+#
+# Soft-fail: install-deckshift-login exits 1 when switch scripts exist but no
+# gamescope session desktop is present — must not abort --force-migrations.
+set +e
 : "${HYPERWEBSTER_SRC:?HYPERWEBSTER_SRC must point at the HyperWebster source root}"
 
 if [ -x /usr/local/bin/switch-to-gaming ]; then
-  sh "$HYPERWEBSTER_SRC/deckshift-login/install-deckshift-login.sh"
+  sh "$HYPERWEBSTER_SRC/deckshift-login/install-deckshift-login.sh" || true
 else
   echo ":: DeckShift not installed on this machine — skipping (opt-in component)"
 fi
+exit 0
