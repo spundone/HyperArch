@@ -50,10 +50,12 @@ See [docs/HARDWARE.md](docs/HARDWARE.md) for hardware guidance and
   timeline snapshots; roll back from Limine.
 - **120/144 Hz hypersmooth UI** - VFR + tuned Hyprland/shell animation durations OOB (toggle in Additions).
 - **Optional zephyr motion** - `hyperwebster-zephyr-polish enable` or Settings → Additions.
-- **Settings → Additions** - layer mod toggles (blur, rounding, hypersmooth, TV profile, …) plus optional software (Steam, Lutris, OBS, …).
+- **Settings → Additions** - layer mod toggles (blur, rounding, hypersmooth, TV profile, …) plus optional software (Steam, Lutris, Heroic, Steam ROM Manager, OBS, …).
 - **Maintenance menu** - `Super+Ctrl+Shift+M` (`hyperwebster-maint`).
 - **`hyperwebster-update`** - snapshot → upgrade → layer migrations.
 - **Gaming (opt-in)**: Deckify/Chimera (`hyperwebster-deckify-install`) or DeckShift;
+  Heroic / Steam ROM Manager for Non-Steam Epic and emulator tiles in gamescope;
+  optional Decky / Millennium (experimental Steam UI mods).
   `Super+Shift+S` or Limine Starman for Steam Big Picture.
 
 ## Build the ISO
