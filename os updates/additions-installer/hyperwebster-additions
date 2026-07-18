@@ -85,7 +85,13 @@ install_one() {
   item=$(jq -ce --arg id "$id" '.items[] | select(.id == $id)' "$MANIFEST") \
     || { echo "hyperwebster-additions: unknown addition: $id" >&2; exit 1; }
   kind=$(item_field "$item" '.kind // "install"')
-  [ "$kind" = "install" ] || { echo "hyperwebster-additions: $id is not installable (kind=$kind)" >&2; exit 1; }
+  # UI sometimes still routes toggles through install (old AdditionsPage). Do
+  # not open a confusing failure — flip the toggle on instead.
+  if [ "$kind" = "toggle" ]; then
+    echo "hyperwebster-additions: $id is a toggle — enabling (not installing)" >&2
+    toggle_one enable "$id"
+    return
+  fi
   name=$(item_field "$item" '.name')
   cmd=$(item_field "$item" '.install')
   printf '\033[1;34m::\033[0m installing %s\n' "$name"
