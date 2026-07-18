@@ -35,9 +35,10 @@ conf_path = Path(sys.argv[1])
 text = conf_path.read_text()
 lines = text.splitlines(keepends=True)
 
-entry_re = re.compile(r"^(?P<slashes>/+)(?P<plus>\+?)(?P<title>.+?)\s*$")
+# limine-entry-tool indents children ("  //linux-cachyos"); allow leading space.
+entry_re = re.compile(r"^(?P<indent>\s*)(?P<slashes>/+)(?P<plus>\+?)(?P<title>.+?)\s*$")
 
-entries = []  # {depth, title, line_idx, plus}
+entries = []  # {depth, title, line_idx, plus, indent, slashes}
 for i, line in enumerate(lines):
     m = entry_re.match(line.rstrip("\n"))
     if not m:
@@ -49,6 +50,7 @@ for i, line in enumerate(lines):
         "plus": bool(m.group("plus")),
         "line_idx": i,
         "slashes": m.group("slashes"),
+        "indent": m.group("indent"),
     })
 
 if not entries:
@@ -123,7 +125,7 @@ for j in expand_idxs:
     if e["plus"]:
         continue
     idx = e["line_idx"]
-    out[idx] = f"{e['slashes']}+{e['title']}\n"
+    out[idx] = f"{e['indent']}{e['slashes']}+{e['title']}\n"
 
 # Set / replace default_entry
 default_line = f"default_entry: {best_path}\n"

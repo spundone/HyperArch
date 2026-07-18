@@ -19,6 +19,9 @@ If `limine-update` still builds a HyperWebster directory with kernel children,
 - `/+Parent` so the submenu is expanded and that kernel is highlighted
 
 Without that, Limine highlights the directory itself - Enter does not boot.
+`limine-entry-tool` indents children (`  //linux-cachyos`); the prefer script
+matches those lines (leading whitespace) so it does not treat the parent UKI
+row as the only leaf.
 
 ## Apply on an installed system
 
