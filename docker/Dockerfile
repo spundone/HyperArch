@@ -35,7 +35,10 @@ RUN useradd -m -U hwbuilder \
     && echo 'hwbuilder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/90-hwbuilder \
     && chmod 0440 /etc/sudoers.d/90-hwbuilder
 
+COPY entrypoint.sh /usr/local/lib/hyperwebster/entrypoint.sh
+RUN chmod 755 /usr/local/lib/hyperwebster/entrypoint.sh
+
 WORKDIR /build
-# Preserve argv (plain `bash -lc` ate extra args after the script name).
-ENTRYPOINT ["/bin/bash", "-c", "exec \"$@\"", "--"]
+# Preserve argv; entrypoint primes machine-id + nspawn --keep-unit for Docker nesting.
+ENTRYPOINT ["/usr/local/lib/hyperwebster/entrypoint.sh"]
 CMD ["./hyperwebster.sh"]
