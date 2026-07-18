@@ -19,6 +19,7 @@ RUN sed -i 's/^DownloadUser/#DownloadUser/' /etc/pacman.conf \
         squashfs-tools \
         coreutils \
         devtools \
+        btrfs-progs \
         pacman-contrib \
         reflector \
         util-linux \
