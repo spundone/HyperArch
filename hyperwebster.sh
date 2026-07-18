@@ -2736,7 +2736,7 @@ CHROOTHOST
         -e 's|^source=.*|source=("nosignal-shell.tar.gz")|' \
         -e "s|^sha256sums=.*|sha256sums=('SKIP')|" \
         -e "s|^pkgver=.*|pkgver=2.0.2.r0.g${shell_short}|" \
-        -e "s|-DCMAKE_INSTALL_PREFIX=/-|-DCMAKE_INSTALL_PREFIX=/ -DVERSION=2.0.2 -DGIT_REVISION=${HYPERWEBSTER_SHELL_COMMIT}|" \
+        -e "s#-DCMAKE_INSTALL_PREFIX=/#-DCMAKE_INSTALL_PREFIX=/ -DVERSION=2.0.2 -DGIT_REVISION=${HYPERWEBSTER_SHELL_COMMIT}#" \
         -e 's|DDISTRIBUTOR="NoSignal (package: $_pkgname)"|DDISTRIBUTOR="HyperWebster (package: $_pkgname)"|' \
         -e 's|pkgdesc="NoSignal desktop shell|pkgdesc="HyperWebster desktop shell|' \
         "$OFFLINE/aur/$name/PKGBUILD"
