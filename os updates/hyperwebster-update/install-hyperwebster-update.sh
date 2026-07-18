@@ -96,6 +96,7 @@ done
 [ -d "$SRC/cachyos-repo-switch" ] && hw_cp "$SRC/cachyos-repo-switch" "$DEST/"
 [ -d "$SRC/theme-polish" ] && hw_cp "$SRC/theme-polish" "$DEST/"
 [ -d "$SRC/drive-automount" ] && hw_cp "$SRC/drive-automount" "$DEST/"
+[ -d "$SRC/drawer-stacking" ] && hw_cp "$SRC/drawer-stacking" "$DEST/"
 [ -d "$SRC/gamemode-toggle-deckshift" ] && hw_cp "$SRC/gamemode-toggle-deckshift" "$DEST/"
 [ -d "$SRC/iphone-tether" ] && hw_cp "$SRC/iphone-tether" "$DEST/"
 [ -d "$SRC/notif-clear-fix" ] && hw_cp "$SRC/notif-clear-fix" "$DEST/"
