@@ -2702,20 +2702,28 @@ CHROOTHOST
     rm -rf "${OFFLINE:?}/aur/$name"
     if [ "$name" = "nosignal-shell" ]; then
       # NOT an AUR package — HyperWebster's fork of the caelestia shell. Clone,
-      # rebrand nosignal -> hyperwebster in QML + DISTRIBUTOR, then build from the
-      # local tree (not a live git fetch) so ISO shells match hyperwebster-* CLIs.
+      # rebrand nosignal -> hyperwebster in QML + DISTRIBUTOR, then build from a
+      # local tarball (not a live git fetch) so ISO shells match hyperwebster-* CLIs.
+      #
+      # makechrootpkg only copies *files* into the chroot — a bare local directory
+      # in source= fails with "nosignal-shell was not found in the build directory
+      # and is not a URL". Ship a .tar.gz instead.
       mkdir -p "$OFFLINE/aur/$name"
       rm -rf "$OFFLINE/aur/$name.fork"
       git clone --depth 1 "$HYPERWEBSTER_SHELL_REPO" -b nosignal "$OFFLINE/aur/$name.fork"
       ( cd "$OFFLINE/aur/$name.fork" && git fetch --depth 1 origin "$HYPERWEBSTER_SHELL_COMMIT" && git checkout -q "$HYPERWEBSTER_SHELL_COMMIT" )
       SHELL_ROOT="$OFFLINE/aur/$name.fork" sh "$HYPERWEBSTER_LAYER_DIR/shell-branding/patch-shell-branding.sh"
-      rm -rf "$OFFLINE/aur/$name/nosignal-shell"
-      cp -a "$OFFLINE/aur/$name.fork" "$OFFLINE/aur/$name/nosignal-shell"
+      # Keep .git so PKGBUILD pkgver() (git describe) still works.
+      tar -czf "$OFFLINE/aur/$name/nosignal-shell.tar.gz" \
+        -C "$OFFLINE/aur" \
+        --transform 's|^nosignal-shell\.fork|nosignal-shell|' \
+        nosignal-shell.fork
       cp "$OFFLINE/aur/$name.fork/packaging/PKGBUILD" "$OFFLINE/aur/$name/PKGBUILD"
-      sed -i 's|^source=.*|source=("nosignal-shell")|' "$OFFLINE/aur/$name/PKGBUILD"
-      sed -i 's|DDISTRIBUTOR="NoSignal (package: $_pkgname)"|DDISTRIBUTOR="HyperWebster (package: $_pkgname)"|' \
-        "$OFFLINE/aur/$name/PKGBUILD"
-      sed -i 's|pkgdesc="NoSignal desktop shell|pkgdesc="HyperWebster desktop shell|' \
+      sed -i \
+        -e 's|^source=.*|source=("nosignal-shell.tar.gz")|' \
+        -e "s|^sha256sums=.*|sha256sums=('SKIP')|" \
+        -e 's|DDISTRIBUTOR="NoSignal (package: $_pkgname)"|DDISTRIBUTOR="HyperWebster (package: $_pkgname)"|' \
+        -e 's|pkgdesc="NoSignal desktop shell|pkgdesc="HyperWebster desktop shell|' \
         "$OFFLINE/aur/$name/PKGBUILD"
     else
       git clone --depth 1 "https://aur.archlinux.org/$name.git" "$OFFLINE/aur/$name"
