@@ -1,19 +1,40 @@
 #!/bin/sh
-# install-sddm-theme.sh — SDDM greeter themed to match the desktop (Material
-# palette from the caelestia scheme, the shell's Google Sans Flex font, and
-# the current wallpaper as background). Idempotent. Needs sudo.
+# install-sddm-theme.sh — SDDM greeter lock-screen twin (frosted wallpaper,
+# Material palette from caelestia, Google Sans Flex, synced face/logo).
+# Idempotent. Needs sudo.
 set -eu
 
 SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 THEME=/usr/share/sddm/themes/caelestia
 
 # 1. Theme files.
-sudo install -d -m 0755 "$THEME" "$THEME/backgrounds"
+sudo install -d -m 0755 "$THEME" "$THEME/backgrounds" "$THEME/assets"
 sudo install -m 0644 "$SRC/caelestia/Main.qml"         "$THEME/Main.qml"
 sudo install -m 0644 "$SRC/caelestia/metadata.desktop" "$THEME/metadata.desktop"
 # Default theme.conf only if none exists yet (sync overwrites it anyway).
 [ -f "$THEME/theme.conf" ] || sudo install -m 0644 "$SRC/caelestia/theme.conf" "$THEME/theme.conf"
+
+# Seed Starman logo into theme assets when present in the layer / shell.
+for logo in \
+  /etc/xdg/quickshell/caelestia/assets/hyperwebster-logo.png \
+  "$SRC/../shell-branding/hyperwebster-logo.png" \
+  "$HOME/.local/share/hyperwebster/shell-branding/hyperwebster-logo.png"
+do
+  if [ -f "$logo" ]; then
+    sudo install -m 0644 "$logo" "$THEME/assets/hyperwebster-logo.png"
+    break
+  fi
+done
 echo ":: installed SDDM theme to $THEME"
+
+# 1b. Greeter gamepad helper — Guide+A / Start → F12 while greeter is up.
+sudo install -m 0755 "$SRC/hyperwebster-greeter-pad" /usr/local/bin/hyperwebster-greeter-pad
+sudo install -m 0644 "$SRC/hyperwebster-greeter-pad.service" \
+  /etc/systemd/system/hyperwebster-greeter-pad.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now hyperwebster-greeter-pad.service 2>/dev/null \
+  || sudo systemctl restart hyperwebster-greeter-pad.service || true
+echo ":: greeter pad helper (lock-twin PIN + Guide+A Starman)"
 
 # 2. Sync script + initial sync from the current scheme/wallpaper (best
 #    effort: if there is no scheme yet — e.g. at image build time — the

@@ -1,0 +1,14 @@
+[Unit]
+Description=HyperWebster SDDM greeter gamepad (lock-twin PIN + Guide+A Starman)
+PartOf=sddm.service
+After=sddm.service
+BindsTo=sddm.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hyperwebster-greeter-pad
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=sddm.service

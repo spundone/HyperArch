@@ -1,0 +1,301 @@
+#!/usr/bin/env python3
+"""hyperwebster-greeter-pad — SDDM greeter gamepad (lock-screen twin).
+
+Mirrors Caelestia lock PIN mode while sddm-greeter is visible:
+
+  D-pad / LB / RB   cycle pending digit 0–9
+  A / RT / X        type pending digit into the password field
+  B / LT            backspace
+  Y                 type 0
+  Start / Guide     submit login (Enter)
+  Guide+A           Starman / gamescope (F12) — greeter-only
+
+Uses /dev/input/js* (mode 0664) so it works as the sddm user without the
+`input` group. Digit / Enter injection via uinput works on the greeter
+TextInput (unlike WlSessionLock, which needs qs IPC).
+
+Writes pending digit to /run/hyperwebster-greeter-pad.digit for the QML hint.
+"""
+from __future__ import annotations
+
+import glob
+import os
+import select
+import struct
+import subprocess
+import sys
+import time
+
+try:
+    from evdev import UInput, ecodes
+except ImportError:
+    print("python-evdev required", file=sys.stderr)
+    sys.exit(1)
+
+JS_EVENT_FMT = "IhBB"
+JS_EVENT_SIZE = struct.calcsize(JS_EVENT_FMT)
+JS_EVENT_BUTTON = 0x01
+JS_EVENT_AXIS = 0x02
+JS_EVENT_INIT = 0x80
+
+# Xbox / xpad layout (Linux joystick API)
+BTN_A, BTN_B, BTN_X, BTN_Y = 0, 1, 2, 3
+BTN_LB, BTN_RB = 4, 5
+BTN_SELECT, BTN_START, BTN_GUIDE = 6, 7, 8
+
+# Common axis indices for hats / triggers on xpad
+AXIS_HAT_X, AXIS_HAT_Y = 6, 7
+AXIS_LT, AXIS_RT = 2, 5
+
+DIGIT_PATH = "/run/hyperwebster-greeter-pad.digit"
+TRIGGER_THRESH = 20000  # js axis mid→max ~32767
+
+
+def greeter_running() -> bool:
+    for name in ("sddm-greeter-qt6", "sddm-greeter"):
+        try:
+            r = subprocess.run(
+                ["pgrep", "-x", name],
+                capture_output=True,
+                timeout=0.5,
+            )
+            if r.returncode == 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def open_js() -> list[tuple[str, object]]:
+    out = []
+    for path in sorted(glob.glob("/dev/input/js*")):
+        try:
+            fd = open(path, "rb")
+            os.set_blocking(fd.fileno(), False)
+            out.append((path, fd))
+        except OSError:
+            continue
+    return out
+
+
+def write_pending(digit: int) -> None:
+    try:
+        with open(DIGIT_PATH, "w", encoding="ascii") as f:
+            f.write(str(int(digit) % 10))
+    except OSError:
+        pass
+
+
+class GreeterPad:
+    def __init__(self) -> None:
+        keys = [
+            ecodes.KEY_F12,
+            ecodes.KEY_ENTER,
+            ecodes.KEY_BACKSPACE,
+        ]
+        keys.extend(getattr(ecodes, f"KEY_{i}") for i in range(10))
+        self.ui = UInput(
+            {ecodes.EV_KEY: keys},
+            name="HyperWebster Greeter Pad",
+            version=0x4,
+        )
+        self.digit = 0
+        self.guide_down = False
+        self.guide_chorded = False
+        self.trigger_down = {"lt": False, "rt": False}
+        self.hat = {"x": 0, "y": 0}
+        self.last_fire = 0.0
+        write_pending(0)
+
+    def tap(self, key: int) -> None:
+        self.ui.write(ecodes.EV_KEY, key, 1)
+        self.ui.syn()
+        self.ui.write(ecodes.EV_KEY, key, 0)
+        self.ui.syn()
+
+    def set_digit(self, d: int) -> None:
+        self.digit = d % 10
+        write_pending(self.digit)
+        print(f"[greeter-pad] digit {self.digit}", flush=True)
+
+    def feed_digit(self) -> None:
+        if not greeter_running():
+            return
+        code = getattr(ecodes, f"KEY_{self.digit}")
+        self.tap(code)
+        print(f"[greeter-pad] fed {self.digit}", flush=True)
+
+    def backspace(self) -> None:
+        if not greeter_running():
+            return
+        self.tap(ecodes.KEY_BACKSPACE)
+        print("[greeter-pad] backspace", flush=True)
+
+    def submit(self) -> None:
+        if not greeter_running():
+            return
+        now = time.monotonic()
+        if now - self.last_fire < 0.8:
+            return
+        self.last_fire = now
+        self.tap(ecodes.KEY_ENTER)
+        print("[greeter-pad] → Enter (sign in)", flush=True)
+
+    def starman(self) -> None:
+        if not greeter_running():
+            return
+        now = time.monotonic()
+        if now - self.last_fire < 1.2:
+            return
+        self.last_fire = now
+        self.tap(ecodes.KEY_F12)
+        print("[greeter-pad] → F12 (Starman)", flush=True)
+
+    def on_button(self, number: int, value: int, pressed: set[int]) -> None:
+        # Guide: hold+A → Starman; release without chord → sign in (lock twin).
+        if number == BTN_GUIDE:
+            if value:
+                self.guide_down = True
+                self.guide_chorded = False
+            else:
+                if self.guide_down and not self.guide_chorded and greeter_running():
+                    self.submit()
+                self.guide_down = False
+            return
+
+        if not value:
+            return
+        if not greeter_running():
+            return
+
+        if self.guide_down and number == BTN_A:
+            self.guide_chorded = True
+            self.starman()
+            pressed.discard(BTN_A)
+            return
+
+        if number == BTN_A or number == BTN_X:
+            self.feed_digit()
+        elif number == BTN_B:
+            self.backspace()
+        elif number == BTN_Y:
+            self.set_digit(0)
+            self.feed_digit()
+        elif number == BTN_LB:
+            self.set_digit(self.digit - 1)
+        elif number == BTN_RB:
+            self.set_digit(self.digit + 1)
+        elif number == BTN_START:
+            self.submit()
+        elif number == BTN_SELECT:
+            for _ in range(32):
+                self.tap(ecodes.KEY_BACKSPACE)
+
+    def on_axis(self, number: int, value: int) -> None:
+        if not greeter_running():
+            return
+        # D-pad hat
+        if number == AXIS_HAT_X:
+            if value < -16000 and self.hat["x"] >= 0:
+                self.set_digit(self.digit - 1)
+            elif value > 16000 and self.hat["x"] <= 0:
+                self.set_digit(self.digit + 1)
+            self.hat["x"] = -1 if value < -16000 else (1 if value > 16000 else 0)
+            return
+        if number == AXIS_HAT_Y:
+            if value < -16000 and self.hat["y"] >= 0:
+                self.set_digit(self.digit + 1)
+            elif value > 16000 and self.hat["y"] <= 0:
+                self.set_digit(self.digit - 1)
+            self.hat["y"] = -1 if value < -16000 else (1 if value > 16000 else 0)
+            return
+        # Triggers
+        if number == AXIS_LT:
+            down = value >= TRIGGER_THRESH
+            if down and not self.trigger_down["lt"]:
+                self.backspace()
+            self.trigger_down["lt"] = down
+            return
+        if number == AXIS_RT:
+            down = value >= TRIGGER_THRESH
+            if down and not self.trigger_down["rt"]:
+                self.feed_digit()
+            self.trigger_down["rt"] = down
+
+
+def main() -> int:
+    pad = GreeterPad()
+    print(
+        "[greeter-pad] lock-twin: D-pad digit, A/RT type, B/LT delete, "
+        "Start/Guide sign-in, Guide+A Starman",
+        flush=True,
+    )
+
+    fds: list[tuple[str, object]] = []
+    pressed: dict[str, set[int]] = {}
+    last_rescan = 0.0
+
+    def rescan() -> None:
+        nonlocal fds
+        for _, fd in fds:
+            try:
+                fd.close()
+            except Exception:
+                pass
+        fds = open_js()
+        pressed.clear()
+        for path, _ in fds:
+            pressed[path] = set()
+        if fds:
+            print(f"[greeter-pad] pads: {', '.join(p for p, _ in fds)}", flush=True)
+
+    rescan()
+
+    while True:
+        now = time.monotonic()
+        if now - last_rescan > 3.0:
+            last_rescan = now
+            current = set(glob.glob("/dev/input/js*"))
+            known = {p for p, _ in fds}
+            if current != known:
+                rescan()
+
+        if not fds:
+            time.sleep(0.5)
+            continue
+
+        rlist, _, _ = select.select([fd for _, fd in fds], [], [], 0.25)
+        if not rlist:
+            continue
+
+        for path, fd in list(fds):
+            if fd not in rlist:
+                continue
+            while True:
+                try:
+                    data = fd.read(JS_EVENT_SIZE)
+                except OSError:
+                    break
+                if not data or len(data) < JS_EVENT_SIZE:
+                    break
+                _t, value, etype, number = struct.unpack(JS_EVENT_FMT, data)
+                if etype & JS_EVENT_INIT:
+                    etype &= ~JS_EVENT_INIT
+                if etype == JS_EVENT_BUTTON:
+                    s = pressed.setdefault(path, set())
+                    if value:
+                        s.add(number)
+                    else:
+                        s.discard(number)
+                    pad.on_button(number, value, s)
+                elif etype == JS_EVENT_AXIS:
+                    pad.on_axis(number, value)
+
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(0)
