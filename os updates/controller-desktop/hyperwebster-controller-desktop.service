@@ -1,0 +1,17 @@
+[Unit]
+Description=HyperWebster controller desktop mapper (Hyprland)
+Documentation=file://%h/.local/share/hyperwebster/controller-desktop/README.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Drop a leftover Starman marker if gamescope is already gone (ConditionPathExists
+# would permanently block restart after unclean Game Mode exits).
+ExecStartPre=/bin/sh -c 'pgrep -x gamescope >/dev/null 2>&1 || pgrep -x gamescope-wl >/dev/null 2>&1 || rm -f /tmp/.gaming-session-active'
+ExecStart=%h/.local/bin/hyperwebster-controller-desktop
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

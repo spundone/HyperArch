@@ -1,0 +1,1191 @@
+#!/usr/bin/env python3
+"""hyperwebster-controller-desktop — map a gamepad to Hyprland desktop actions.
+
+Desktop-session only. Never fights Steam GamepadUI / gamescope:
+  * exits if gamescope is running or /tmp/.gaming-session-active exists
+  * pauses (releases device grab) while a game / Proton / gamescope window
+    is focused so Steam Input owns the pad
+  * while the session lock is active, switches to PIN / password entry mode
+    (uinput digits → LockSurface pam.handleKey)
+
+Requires: python-evdev, membership in the `input` group (for /dev/uinput).
+"""
+from __future__ import annotations
+
+import json
+import os
+import select
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from evdev import InputDevice, UInput, ecodes, list_devices
+
+LAYER = Path(os.environ.get(
+    "HYPERWEBSTER_CONTROLLER_DIR",
+    Path.home() / ".local/share/hyperwebster/controller-desktop",
+))
+PROFILE_PATH = Path(os.environ.get(
+    "HYPERWEBSTER_CONTROLLER_PROFILE",
+    LAYER / "profile.json",
+))
+STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+PIDFILE = STATE_DIR / "hyperwebster-controller-desktop.pid"
+
+PAUSE_CLASS_PREFIXES = (
+    "steam_app_",
+    "games-.",
+    "gamescope",
+    "steam_proton",
+    "hl2_linux",
+    "Wine",
+    "steam_app",
+)
+PAUSE_CLASS_EXACT = {
+    "games-s",
+    "gamescope",
+    "gamescope-wl",
+    "steam_app",
+}
+PAUSE_TITLE_HINTS = ("Proton", "Wine")
+
+# evdev often returns aliases like ('BTN_A', 'BTN_GAMEPAD', 'BTN_SOUTH'). Our
+# profile uses the SOUTH/EAST/WEST/NORTH names — prefer those.
+_BTN_PREFER = (
+    "BTN_SOUTH", "BTN_EAST", "BTN_WEST", "BTN_NORTH",
+    "BTN_MODE", "BTN_START", "BTN_SELECT",
+    "BTN_TL", "BTN_TR", "BTN_THUMBL", "BTN_THUMBR",
+    "BTN_TL2", "BTN_TR2",
+)
+
+
+def btn_name(code: int) -> str | None:
+    name = ecodes.BTN.get(code) or ecodes.KEY.get(code)
+    if isinstance(name, (tuple, list)):
+        for pref in _BTN_PREFER:
+            if pref in name:
+                return pref
+        return name[0]
+    return name
+
+
+# Gamescope / Steam GamepadUI analogues for Hyprland + caelestia.
+# Hold layers (release alone = base action): Guide=system Select=shell
+# Start=windows Y=apps. Covers the bulk of HyperWebster-keybindings.md.
+DEFAULT_PROFILE = {
+    "deadzone": 0.28,
+    "mouse_speed": 14,
+    "mouse_with_guide": True,
+    "trigger_click_threshold": 0.75,
+    "bindings": {
+        "BTN_MODE": "launcher",
+        "BTN_SOUTH": "key:KEY_ENTER",
+        "BTN_EAST": "key:KEY_ESC",
+        "BTN_WEST": "key:KEY_TAB",
+        "BTN_NORTH": "settings",
+        "BTN_TL": "workspace_prev",
+        "BTN_TR": "workspace_next",
+        "BTN_SELECT": "dashboard",
+        "BTN_START": "overview",
+        "BTN_THUMBL": "keybinds",
+        "BTN_THUMBR": "fullscreen",
+        "ABS_HAT0X:-1": "focus_l",
+        "ABS_HAT0X:1": "focus_r",
+        "ABS_HAT0Y:-1": "scroll_up",
+        "ABS_HAT0Y:1": "scroll_down",
+        "TRIGGER_LT": "mouse_right",
+        "TRIGGER_RT": "mouse_left",
+        "GUIDE+BTN_START": "switch_gaming",
+        "GUIDE+BTN_SELECT": "session_menu",
+        "GUIDE+BTN_SOUTH": "mouse_left",
+        "GUIDE+BTN_EAST": "close_window",
+        "GUIDE+BTN_WEST": "omarchy_menu",
+        "GUIDE+BTN_NORTH": "lock",
+        "GUIDE+BTN_TR": "screenshot",
+        "GUIDE+BTN_TL": "screenshot_region",
+        "GUIDE+BTN_THUMBL": "suspend",
+        "GUIDE+BTN_THUMBR": "fullscreen_bordered",
+        "GUIDE+ABS_HAT0Y:-1": "volume_up",
+        "GUIDE+ABS_HAT0Y:1": "volume_down",
+        "GUIDE+ABS_HAT0X:-1": "brightness_down",
+        "GUIDE+ABS_HAT0X:1": "brightness_up",
+        "GUIDE+TRIGGER_LT": "mute",
+        "GUIDE+TRIGGER_RT": "mic_mute",
+        "SELECT+BTN_SOUTH": "sidebar",
+        "SELECT+BTN_EAST": "clear_notifs",
+        "SELECT+BTN_WEST": "clipboard",
+        "SELECT+BTN_NORTH": "emoji",
+        "SELECT+BTN_START": "session_menu",
+        "SELECT+BTN_THUMBL": "nightlight",
+        "SELECT+BTN_THUMBR": "special_workspace",
+        "SELECT+ABS_HAT0Y:-1": "focus_u",
+        "SELECT+ABS_HAT0Y:1": "focus_d",
+        "SELECT+ABS_HAT0X:-1": "focus_l",
+        "SELECT+ABS_HAT0X:1": "focus_r",
+        "SELECT+TRIGGER_LT": "paste",
+        "SELECT+TRIGGER_RT": "copy",
+        "START+ABS_HAT0X:-1": "movewindow_l",
+        "START+ABS_HAT0X:1": "movewindow_r",
+        "START+ABS_HAT0Y:-1": "movewindow_u",
+        "START+ABS_HAT0Y:1": "movewindow_d",
+        "START+BTN_SOUTH": "togglefloat",
+        "START+BTN_EAST": "close_window",
+        "START+BTN_WEST": "togglesplit",
+        "START+BTN_NORTH": "pin_window",
+        "START+BTN_TL": "resize_narrower",
+        "START+BTN_TR": "resize_wider",
+        "START+BTN_THUMBL": "center_window",
+        "START+BTN_THUMBR": "fullscreen_bordered",
+        "START+BTN_SELECT": "toggle_group",
+        "START+TRIGGER_LT": "move_workspace_prev",
+        "START+TRIGGER_RT": "move_workspace_next",
+        "Y+BTN_SOUTH": "app_terminal",
+        "Y+BTN_EAST": "app_browser",
+        "Y+BTN_WEST": "app_files",
+        "Y+BTN_SELECT": "app_editor",
+        "Y+BTN_START": "app_music",
+        "Y+BTN_TL": "app_activity",
+        "Y+BTN_TR": "app_audio",
+        "Y+BTN_THUMBL": "app_install",
+        "Y+BTN_THUMBR": "app_todo",
+        "Y+ABS_HAT0Y:-1": "media_prev",
+        "Y+ABS_HAT0Y:1": "media_next",
+        "Y+ABS_HAT0X:-1": "media_prev",
+        "Y+ABS_HAT0X:1": "media_next",
+        "Y+TRIGGER_LT": "media_play",
+        "Y+TRIGGER_RT": "media_play",
+    },
+    "lock_bindings": {
+        "ABS_HAT0X:-1": "lock_digit_prev",
+        "ABS_HAT0X:1": "lock_digit_next",
+        "ABS_HAT0Y:-1": "lock_digit_next",
+        "ABS_HAT0Y:1": "lock_digit_prev",
+        "BTN_TL": "lock_digit_prev",
+        "BTN_TR": "lock_digit_next",
+        "BTN_SOUTH": "lock_digit_confirm",
+        "BTN_EAST": "lock_backspace",
+        "BTN_NORTH": "lock_feed:0",
+        "BTN_WEST": "lock_digit_confirm",
+        "BTN_START": "lock_submit",
+        "BTN_MODE": "lock_submit",
+        "BTN_SELECT": "lock_clear",
+        "BTN_THUMBL": "lock_feed:7",
+        "BTN_THUMBR": "lock_feed:8",
+        "GUIDE+BTN_SOUTH": "lock_submit",
+        "GUIDE+BTN_EAST": "lock_clear",
+    },
+}
+
+
+def log(msg: str) -> None:
+    print(f"[controller-desktop] {msg}", flush=True)
+
+
+def load_profile() -> dict:
+    if PROFILE_PATH.is_file():
+        try:
+            data = json.loads(PROFILE_PATH.read_text())
+            base = dict(DEFAULT_PROFILE)
+            base.update({k: v for k, v in data.items() if k not in ("bindings", "lock_bindings")})
+            binds = dict(DEFAULT_PROFILE["bindings"])
+            binds.update(data.get("bindings") or {})
+            base["bindings"] = binds
+            lock_binds = dict(DEFAULT_PROFILE["lock_bindings"])
+            lock_binds.update(data.get("lock_bindings") or {})
+            base["lock_bindings"] = lock_binds
+            return base
+        except Exception as e:
+            log(f"profile read failed ({e}); using defaults")
+    return dict(DEFAULT_PROFILE)
+
+
+def hypr_env() -> dict:
+    env = os.environ.copy()
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    if not env.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        hypr = runtime / "hypr"
+        if hypr.is_dir():
+            # Prefer the newest instance (active session).
+            children = sorted(
+                (c for c in hypr.iterdir() if c.is_dir()),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if children:
+                env["HYPRLAND_INSTANCE_SIGNATURE"] = children[0].name
+    if not env.get("WAYLAND_DISPLAY"):
+        for name in ("wayland-1", "wayland-0"):
+            if (runtime / name).exists():
+                env["WAYLAND_DISPLAY"] = name
+                break
+    return env
+
+
+def hyprctl(*args: str) -> str:
+    try:
+        r = subprocess.run(
+            ["hyprctl", *args],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            env=hypr_env(),
+        )
+        return (r.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def qs(*args: str) -> str:
+    try:
+        r = subprocess.run(
+            ["qs", "-c", "caelestia", "ipc", "call", *args],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            env=hypr_env(),
+        )
+        return (r.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def run_detached(cmd: list[str]) -> None:
+    subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=hypr_env(),
+        start_new_session=True,
+    )
+
+
+def gamescope_active() -> bool:
+    """True while Starman/gamescope owns the seat.
+
+    Clears a leftover /tmp/.gaming-session-active when gamescope is gone so the
+    desktop mapper can start again after unclean Game Mode exits.
+    """
+    try:
+        r = subprocess.run(
+            ["pgrep", "-x", "gamescope"],
+            capture_output=True,
+            timeout=0.5,
+        )
+        running = r.returncode == 0
+    except Exception:
+        running = False
+    if not running:
+        try:
+            r = subprocess.run(
+                ["pgrep", "-x", "gamescope-wl"],
+                capture_output=True,
+                timeout=0.5,
+            )
+            running = r.returncode == 0
+        except Exception:
+            pass
+
+    flag = Path("/tmp/.gaming-session-active")
+    if flag.exists() and not running:
+        try:
+            flag.unlink()
+            log("cleared stale /tmp/.gaming-session-active")
+        except OSError:
+            pass
+        return False
+    return running or flag.exists()
+
+
+def locked_hint() -> bool | None:
+    """Return session LockedHint from loginctl, or None if unavailable."""
+    try:
+        r = subprocess.run(
+            ["loginctl", "list-sessions", "--no-legend"],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        uid = str(os.getuid())
+        for line in (r.stdout or "").splitlines():
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            sid, suid = parts[0], parts[1]
+            if suid != uid:
+                continue
+            info = subprocess.run(
+                ["loginctl", "show-session", sid, "-p", "LockedHint", "-p", "Type", "-p", "Active"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+            )
+            props = {}
+            for pline in (info.stdout or "").splitlines():
+                if "=" in pline:
+                    k, v = pline.split("=", 1)
+                    props[k] = v
+            if props.get("Active") != "yes":
+                continue
+            if props.get("Type") not in {"wayland", "x11"}:
+                continue
+            return props.get("LockedHint", "no").lower() in {"yes", "1", "true"}
+    except Exception:
+        return None
+    return None
+
+
+def session_locked() -> bool:
+    """True when the graphical session is actually locked.
+
+    Caelestia uses WlSessionLock; Hyprland often leaves loginctl LockedHint at
+    no while qs lock.isLocked is true. Treat LockedHint=yes as definitive, then
+    OR in qs — never trust LockedHint=no alone (that used to skip PIN mode).
+    """
+    if locked_hint() is True:
+        return True
+    out = qs("lock", "isLocked").lower().strip()
+    return out in {"true", "1", "yes"}
+
+
+def focused_should_pause() -> bool:
+    raw = hyprctl("activewindow", "-j")
+    if not raw:
+        return False
+    try:
+        win = json.loads(raw)
+    except Exception:
+        return False
+    cls = str(win.get("class") or "")
+    title = str(win.get("title") or "")
+    if cls in PAUSE_CLASS_EXACT:
+        return True
+    for p in PAUSE_CLASS_PREFIXES:
+        if cls.startswith(p):
+            return True
+    for h in PAUSE_TITLE_HINTS:
+        if h in title and ("steam_app" in cls or "Proton" in title or "Wine" in title):
+            return True
+    if win.get("fullscreen") and cls and cls.lower() not in {
+        "firefox", "chromium", "google-chrome", "brave-browser", "zen",
+        "kitty", "Alacritty", "org.gnome.Nautilus", "thunar",
+        "caelestia-launcher", "steam",
+    }:
+        if "steam" in cls.lower() or "game" in cls.lower() or "unity" in cls.lower():
+            return True
+    return False
+
+
+def is_gamepad(dev: InputDevice) -> bool:
+    name = (dev.name or "").lower()
+    if "keyd virtual" in name or "virtual pointer" in name:
+        return False
+    if "hyperwebster controller" in name:
+        return False
+    caps = dev.capabilities()
+    keys = set(caps.get(ecodes.EV_KEY, []))
+    if ecodes.BTN_GAMEPAD in keys or ecodes.BTN_SOUTH in keys or ecodes.BTN_A in keys:
+        return True
+    if ecodes.BTN_MODE in keys and ecodes.BTN_START in keys:
+        return True
+    abs_codes = {
+        (a[0] if isinstance(a, tuple) else a)
+        for a in caps.get(ecodes.EV_ABS, [])
+    }
+    if ecodes.ABS_HAT0X in abs_codes and (
+        ecodes.BTN_TL in keys or ecodes.BTN_TR in keys or ecodes.BTN_SELECT in keys
+    ):
+        return True
+    return False
+
+
+def find_gamepads() -> list[InputDevice]:
+    found: list[InputDevice] = []
+    for path in list_devices():
+        try:
+            d = InputDevice(path)
+        except Exception:
+            continue
+        if is_gamepad(d):
+            found.append(d)
+    return found
+
+
+class ControllerDesktop:
+    def __init__(self, profile: dict):
+        self.profile = profile
+        self.bindings: dict = profile.get("bindings") or {}
+        self.lock_bindings: dict = profile.get("lock_bindings") or {}
+        self.deadzone = float(profile.get("deadzone", 0.28))
+        self.mouse_speed = float(profile.get("mouse_speed", 14))
+        self.mouse_with_guide = bool(profile.get("mouse_with_guide", True))
+        self.trigger_threshold = float(profile.get("trigger_click_threshold", 0.75))
+        self.ui: UInput | None = None
+        self.dev: InputDevice | None = None
+        self.grabbed = False
+        self.paused = False
+        self.locked = False
+        self.guide_down = False
+        self.select_down = False
+        self.start_down = False
+        self.y_down = False
+        self.guide_chorded = False
+        self.select_chorded = False
+        self.start_chorded = False
+        self.y_chorded = False
+        self.lock_digit = 0
+        self.hat = {"x": 0, "y": 0}
+        self.axes = {"x": 0.0, "y": 0.0, "rx": 0.0, "ry": 0.0}
+        self.trigger_down = {"lt": False, "rt": False}
+        self._stop = False
+        self._axis_info: dict[int, tuple[int, int]] = {}
+        self._hat_repeat_at = 0.0
+        self._hat_y_action: str | None = None
+
+    def setup_uinput(self) -> None:
+        keys = [
+            ecodes.KEY_ENTER, ecodes.KEY_ESC, ecodes.KEY_TAB,
+            ecodes.KEY_LEFT, ecodes.KEY_RIGHT, ecodes.KEY_UP, ecodes.KEY_DOWN,
+            ecodes.KEY_F10, ecodes.KEY_SPACE, ecodes.KEY_BACKSPACE,
+            ecodes.KEY_LEFTMETA, ecodes.KEY_LEFTCTRL, ecodes.KEY_PRINT,
+            ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN, ecodes.KEY_MUTE,
+            ecodes.KEY_BRIGHTNESSUP, ecodes.KEY_BRIGHTNESSDOWN,
+            ecodes.KEY_PLAYPAUSE, ecodes.KEY_NEXTSONG, ecodes.KEY_PREVIOUSSONG,
+            ecodes.KEY_LEFTSHIFT, ecodes.KEY_LEFTALT, ecodes.KEY_C, ecodes.KEY_V,
+            ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE,
+        ]
+        keys.extend(getattr(ecodes, f"KEY_{i}") for i in range(10))
+        caps = {
+            ecodes.EV_KEY: keys,
+            ecodes.EV_REL: [
+                ecodes.REL_X, ecodes.REL_Y,
+                ecodes.REL_WHEEL, ecodes.REL_HWHEEL,
+            ],
+        }
+        self.ui = UInput(caps, name="HyperWebster Controller Desktop", version=0x3)
+
+    def open_pad(self) -> bool:
+        pads = find_gamepads()
+        if not pads:
+            return False
+        pads.sort(key=lambda d: (
+            0 if any(s in (d.name or "").lower() for s in (
+                "xbox", "gamepad", "controller", "games", "dualshock",
+                "dualsense", "8bitdo", "x-box",
+            )) else 1,
+            d.name or "",
+        ))
+        self.dev = pads[0]
+        absinfo = self.dev.capabilities().get(ecodes.EV_ABS, [])
+        for item in absinfo:
+            code = item[0] if isinstance(item, tuple) else item
+            info = item[1] if isinstance(item, tuple) and len(item) > 1 else None
+            if info is not None:
+                self._axis_info[code] = (info.min, info.max)
+        log(f"using {self.dev.path} ({self.dev.name})")
+        return True
+
+    def set_grab(self, on: bool) -> None:
+        if not self.dev or self.grabbed == on:
+            return
+        try:
+            self.dev.grab() if on else self.dev.ungrab()
+            self.grabbed = on
+            log("grab on" if on else "grab off (pass-through to Steam/games)")
+        except OSError as e:
+            log(f"grab failed: {e}")
+
+    def tap_key(self, keycode: int) -> None:
+        if not self.ui:
+            return
+        self.ui.write(ecodes.EV_KEY, keycode, 1)
+        self.ui.syn()
+        self.ui.write(ecodes.EV_KEY, keycode, 0)
+        self.ui.syn()
+
+    def tap_chord(self, *keycodes: int) -> None:
+        if not self.ui:
+            return
+        for k in keycodes:
+            self.ui.write(ecodes.EV_KEY, k, 1)
+        self.ui.syn()
+        for k in reversed(keycodes):
+            self.ui.write(ecodes.EV_KEY, k, 0)
+        self.ui.syn()
+
+    def click_mouse(self, button: int) -> None:
+        if not self.ui:
+            return
+        self.ui.write(ecodes.EV_KEY, button, 1)
+        self.ui.syn()
+        self.ui.write(ecodes.EV_KEY, button, 0)
+        self.ui.syn()
+
+    def move_mouse(self, dx: float, dy: float) -> None:
+        if not self.ui:
+            return
+        ix, iy = int(dx), int(dy)
+        if ix == 0 and iy == 0:
+            return
+        if ix:
+            self.ui.write(ecodes.EV_REL, ecodes.REL_X, ix)
+        if iy:
+            self.ui.write(ecodes.EV_REL, ecodes.REL_Y, iy)
+        self.ui.syn()
+
+    def scroll_wheel(self, ticks: int) -> None:
+        if not self.ui or not ticks:
+            return
+        self.ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, int(ticks))
+        self.ui.syn()
+
+    def scroll_wheel_h(self, ticks: int) -> None:
+        if not self.ui or not ticks:
+            return
+        self.ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL, int(ticks))
+        self.ui.syn()
+
+    def axis_norm(self, code: int, value: int) -> float:
+        lo, hi = self._axis_info.get(code, (-32768, 32767))
+        if hi == lo:
+            return 0.0
+        # Triggers are often 0..255 with rest at 0
+        if lo >= 0 and hi > lo and code in (ecodes.ABS_Z, ecodes.ABS_RZ, getattr(ecodes, "ABS_BRAKE", -1), getattr(ecodes, "ABS_GAS", -2)):
+            return max(0.0, min(1.0, (value - lo) / float(hi - lo)))
+        mid = (hi + lo) / 2.0
+        span = (hi - lo) / 2.0
+        v = (value - mid) / span
+        if abs(v) < self.deadzone:
+            return 0.0
+        sign = 1 if v > 0 else -1
+        return sign * min(1.0, (abs(v) - self.deadzone) / (1.0 - self.deadzone))
+
+    def active_bindings(self) -> dict:
+        return self.lock_bindings if self.locked else self.bindings
+
+    def do_action(self, action: str) -> None:
+        if not action:
+            return
+        if action.startswith("key:"):
+            name = action.split(":", 1)[1]
+            code = getattr(ecodes, name, None)
+            if code is not None:
+                self.tap_key(code)
+            return
+        if action == "launcher":
+            qs("drawers", "toggle", "launcher")
+            return
+        if action == "dashboard":
+            qs("drawers", "toggle", "dashboard")
+            return
+        if action == "session_menu":
+            # Soft power / session surface — dashboard is the QAM analogue.
+            qs("drawers", "toggle", "dashboard")
+            return
+        if action == "overview":
+            run_detached(["qs", "ipc", "-c", "overview", "call", "overview", "toggle"])
+            return
+        if action == "settings":
+            run_detached(["hyperwebster-settings"]) if which("hyperwebster-settings") else self.tap_key(ecodes.KEY_F10)
+            return
+        if action == "keybinds":
+            help_bin = Path.home() / ".local/bin/hyperwebster-keybinds"
+            run_detached([str(help_bin) if help_bin.is_file() else "hyperwebster-keybinds"])
+            return
+        if action == "workspace_prev":
+            hyprctl("dispatch", "workspace", "-1")
+            return
+        if action == "workspace_next":
+            hyprctl("dispatch", "workspace", "+1")
+            return
+        if action == "focus_l":
+            hyprctl("dispatch", "movefocus", "l")
+            return
+        if action == "focus_r":
+            hyprctl("dispatch", "movefocus", "r")
+            return
+        if action == "focus_u":
+            hyprctl("dispatch", "movefocus", "u")
+            return
+        if action == "focus_d":
+            hyprctl("dispatch", "movefocus", "d")
+            return
+        if action == "movewindow_l":
+            hyprctl("dispatch", "movewindow", "l")
+            return
+        if action == "movewindow_r":
+            hyprctl("dispatch", "movewindow", "r")
+            return
+        if action == "movewindow_u":
+            hyprctl("dispatch", "movewindow", "u")
+            return
+        if action == "movewindow_d":
+            hyprctl("dispatch", "movewindow", "d")
+            return
+        if action == "togglefloat":
+            hyprctl("dispatch", "togglefloating")
+            return
+        if action == "togglesplit":
+            hyprctl("dispatch", "togglesplit")
+            return
+        if action == "pin_window":
+            hyprctl("dispatch", "pin")
+            return
+        if action == "toggle_group":
+            hyprctl("dispatch", "togglegroup")
+            return
+        if action == "center_window":
+            hyprctl("dispatch", "centerwindow")
+            return
+        if action == "resize_narrower":
+            hyprctl("dispatch", "resizeactive", "-10% 0")
+            return
+        if action == "resize_wider":
+            hyprctl("dispatch", "resizeactive", "10% 0")
+            return
+        if action == "fullscreen_bordered":
+            hyprctl("dispatch", "fullscreen", "0")
+            return
+        if action == "move_workspace_prev":
+            hyprctl("dispatch", "movetoworkspace", "-1")
+            return
+        if action == "move_workspace_next":
+            hyprctl("dispatch", "movetoworkspace", "+1")
+            return
+        if action == "special_workspace":
+            hyprctl("dispatch", "togglespecialworkspace")
+            return
+        if action == "sidebar":
+            qs("drawers", "toggle", "sidebar")
+            return
+        if action == "clear_notifs":
+            qs("notifs", "clear")
+            return
+        if action == "clipboard":
+            # Super+Ctrl+V clipboard history
+            run_detached(["bash", "-lc", "qs -c caelestia ipc call picker openClip 2>/dev/null || caelestia clipboard"])
+            return
+        if action == "emoji":
+            run_detached(["bash", "-lc", "qs -c caelestia ipc call picker open 2>/dev/null || true"])
+            return
+        if action == "nightlight":
+            if which("hyperwebster-nightlight-toggle"):
+                run_detached(["hyperwebster-nightlight-toggle"])
+            else:
+                run_detached(["bash", "-lc", "hyprctl hyprsunset identity 2>/dev/null; true"])
+            return
+        if action == "copy":
+            # Universal copy (Super+C analogue via Ctrl+C; terminals may need Shift)
+            self.tap_chord(ecodes.KEY_LEFTCTRL, ecodes.KEY_C)
+            return
+        if action == "paste":
+            self.tap_chord(ecodes.KEY_LEFTCTRL, ecodes.KEY_V)
+            return
+        if action == "mute":
+            if which("wpctl"):
+                run_detached(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+            else:
+                self.tap_key(ecodes.KEY_MUTE)
+            return
+        if action == "mic_mute":
+            if which("wpctl"):
+                run_detached(["wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"])
+            return
+        if action == "suspend":
+            run_detached(["systemctl", "suspend"])
+            return
+        if action == "media_play":
+            self.tap_key(ecodes.KEY_PLAYPAUSE)
+            return
+        if action == "media_next":
+            self.tap_key(ecodes.KEY_NEXTSONG)
+            return
+        if action == "media_prev":
+            self.tap_key(ecodes.KEY_PREVIOUSSONG)
+            return
+        if action == "app_terminal":
+            run_detached(["bash", "-lc", "kitty || $TERMINAL || alacritty"])
+            return
+        if action == "app_browser":
+            run_detached(["bash", "-lc", "chromium || chromium-browser || firefox"])
+            return
+        if action == "app_files":
+            run_detached(["bash", "-lc", "nautilus || thunar || dolphin"])
+            return
+        if action == "app_editor":
+            run_detached(["bash", "-lc", "gnome-text-editor || gedit || kate"])
+            return
+        if action == "app_music":
+            run_detached(["bash", "-lc", "caelestia toggle music 2>/dev/null || hyperwebster-cliamp || true"])
+            return
+        if action == "app_activity":
+            run_detached(["bash", "-lc", "caelestia toggle sysmon 2>/dev/null || btop || htop"])
+            return
+        if action == "app_audio":
+            run_detached(["bash", "-lc", "pavucontrol || pavucontrol-qt"])
+            return
+        if action == "app_install":
+            if which("hyperwebster-omarchy-menu"):
+                run_detached(["hyperwebster-omarchy-menu"])
+            else:
+                run_detached(["bash", "-lc", "shelly || true"])
+            return
+        if action == "app_todo":
+            run_detached(["bash", "-lc", "caelestia toggle todo 2>/dev/null || true"])
+            return
+        if action == "scroll_up":
+            # Mouse-wheel gesture + Up arrow (lists / browsers / terminals).
+            self.scroll_wheel(3)
+            self.tap_key(ecodes.KEY_UP)
+            return
+        if action == "scroll_down":
+            self.scroll_wheel(-3)
+            self.tap_key(ecodes.KEY_DOWN)
+            return
+        if action == "scroll_left":
+            self.scroll_wheel_h(-3)
+            self.tap_key(ecodes.KEY_LEFT)
+            return
+        if action == "scroll_right":
+            self.scroll_wheel_h(3)
+            self.tap_key(ecodes.KEY_RIGHT)
+            return
+        if action == "fullscreen":
+            hyprctl("dispatch", "fullscreen")
+            return
+        if action == "close_window":
+            out = hyprctl("dispatch", "killactive")
+            if out != "ok":
+                hyprctl("dispatch", "closewindow")
+            log("close window")
+            return
+        if action.startswith("hypr:"):
+            # hypr:dispatch arg1 arg2…
+            parts = action[5:].split()
+            if parts:
+                hyprctl("dispatch", *parts)
+            return
+        if action == "switch_gaming":
+            # Prefer ~/.local/bin so cgroup-safe updates apply without root.
+            local_sw = Path.home() / ".local/bin/switch-to-gaming"
+            sw = str(local_sw) if local_sw.is_file() else "switch-to-gaming"
+            run_detached([sw])
+            return
+        if action == "lock":
+            qs("lock", "lock")
+            return
+        if action == "omarchy_menu":
+            if which("hyperwebster-omarchy-menu"):
+                run_detached(["hyperwebster-omarchy-menu"])
+            else:
+                qs("drawers", "toggle", "launcher")
+            return
+        if action == "screenshot":
+            if which("hyprshot"):
+                run_detached(["hyprshot", "-m", "output", "--clipboard-only"])
+            elif which("grim"):
+                run_detached(["bash", "-lc", "grim - | wl-copy"])
+            else:
+                self.tap_key(ecodes.KEY_PRINT)
+            return
+        if action == "screenshot_region":
+            if which("hyprshot"):
+                run_detached(["hyprshot", "-m", "region", "--clipboard-only"])
+            elif which("grim") and which("slurp"):
+                run_detached(["bash", "-lc", "grim -g \"$(slurp)\" - | wl-copy"])
+            else:
+                self.tap_key(ecodes.KEY_PRINT)
+            return
+        if action == "volume_up":
+            if which("wpctl"):
+                run_detached(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+"])
+            else:
+                self.tap_key(ecodes.KEY_VOLUMEUP)
+            return
+        if action == "volume_down":
+            if which("wpctl"):
+                run_detached(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"])
+            else:
+                self.tap_key(ecodes.KEY_VOLUMEDOWN)
+            return
+        if action == "brightness_up":
+            if which("brightnessctl"):
+                run_detached(["brightnessctl", "set", "5%+"])
+            else:
+                self.tap_key(ecodes.KEY_BRIGHTNESSUP)
+            return
+        if action == "brightness_down":
+            if which("brightnessctl"):
+                run_detached(["brightnessctl", "set", "5%-"])
+            else:
+                self.tap_key(ecodes.KEY_BRIGHTNESSDOWN)
+            return
+        if action == "mouse_left":
+            self.click_mouse(ecodes.BTN_LEFT)
+            return
+        if action == "mouse_right":
+            self.click_mouse(ecodes.BTN_RIGHT)
+            return
+        if action == "lock_digit_prev":
+            self.lock_digit = (self.lock_digit - 1) % 10
+            log(f"lock digit {self.lock_digit}")
+            qs("lock", "pending", str(self.lock_digit))
+            return
+        if action == "lock_digit_next":
+            self.lock_digit = (self.lock_digit + 1) % 10
+            log(f"lock digit {self.lock_digit}")
+            qs("lock", "pending", str(self.lock_digit))
+            return
+        if action == "lock_digit_confirm":
+            # WlSessionLock ignores uinput — feed PAM via qs IPC.
+            digit = str(self.lock_digit)
+            out = qs("lock", "feed", digit)
+            if "No running" in out or "Unknown function" in out or "no such" in out.lower():
+                log(f"lock feed failed: {out!r}")
+                self.tap_key(getattr(ecodes, f"KEY_{self.lock_digit}"))
+            else:
+                log(f"lock fed {digit}")
+            return
+        if action.startswith("lock_feed:"):
+            text = action.split(":", 1)[1]
+            out = qs("lock", "feed", text)
+            if "No running" in out or "Unknown function" in out:
+                log(f"lock feed failed: {out!r}")
+            else:
+                log(f"lock fed {text!r}")
+            return
+        if action == "lock_clear":
+            qs("lock", "clear")
+            return
+        if action == "lock_backspace":
+            qs("lock", "backspace")
+            return
+        if action == "lock_submit":
+            qs("lock", "submit")
+            log("lock submit")
+            return
+        if action.startswith("exec:"):
+            run_detached(["bash", "-lc", action[5:]])
+            return
+        log(f"unknown action: {action}")
+
+    def resolve_name(self, name: str | None) -> str | None:
+        if not name:
+            return None
+        binds = self.active_bindings()
+        if self.locked:
+            return binds.get(name)
+        # Layer priority: Guide > Select > Start > Y > base
+        for prefix, active in (
+            ("GUIDE+", self.guide_down),
+            ("SELECT+", self.select_down),
+            ("START+", self.start_down),
+            ("Y+", self.y_down),
+        ):
+            if not active:
+                continue
+            combo = f"{prefix}{name}"
+            if combo in binds:
+                return binds[combo]
+        return binds.get(name)
+
+    def resolve_btn(self, code: int) -> str | None:
+        return self.resolve_name(btn_name(code))
+
+    def _mark_chord(self) -> None:
+        if self.guide_down:
+            self.guide_chorded = True
+        if self.select_down:
+            self.select_chorded = True
+        if self.start_down:
+            self.start_chorded = True
+        if self.y_down:
+            self.y_chorded = True
+
+    def on_button(self, code: int, value: int) -> None:
+        name = btn_name(code)
+
+        # Hold-modifiers: release alone fires base bind; with another button = layer.
+        if name == "BTN_MODE":
+            if value == 1:
+                self.guide_down = True
+                self.guide_chorded = False
+                if self.locked:
+                    action = self.resolve_name("BTN_MODE")
+                    if action:
+                        self.do_action(action)
+            else:
+                if self.locked:
+                    self.guide_down = False
+                    return
+                if self.guide_down and not self.guide_chorded:
+                    self.do_action(self.bindings.get("BTN_MODE") or "launcher")
+                self.guide_down = False
+            return
+
+        if not self.locked:
+            if name == "BTN_SELECT":
+                if value == 1:
+                    self.select_down = True
+                    self.select_chorded = False
+                else:
+                    if self.select_down and not self.select_chorded:
+                        self.do_action(self.bindings.get("BTN_SELECT") or "dashboard")
+                    self.select_down = False
+                return
+            if name == "BTN_START":
+                if value == 1:
+                    self.start_down = True
+                    self.start_chorded = False
+                else:
+                    if self.start_down and not self.start_chorded:
+                        self.do_action(self.bindings.get("BTN_START") or "overview")
+                    self.start_down = False
+                return
+            if name == "BTN_NORTH":
+                if value == 1:
+                    self.y_down = True
+                    self.y_chorded = False
+                else:
+                    if self.y_down and not self.y_chorded:
+                        self.do_action(self.bindings.get("BTN_NORTH") or "settings")
+                    self.y_down = False
+                return
+
+        if value != 1:
+            return
+
+        # Digital trigger buttons on some pads
+        if name in ("BTN_TL2", "BTN_TRIGGER_HAPPY1") and not self.locked:
+            self._mark_chord()
+            self.do_action(self.resolve_name("TRIGGER_LT") or "mouse_right")
+            return
+        if name in ("BTN_TR2", "BTN_TRIGGER_HAPPY2"):
+            self._mark_chord()
+            if self.locked:
+                self.do_action(self.resolve_name("TRIGGER_RT") or "lock_digit_confirm")
+            else:
+                self.do_action(self.resolve_name("TRIGGER_RT") or "mouse_left")
+            return
+
+        if not self.locked:
+            self._mark_chord()
+        action = self.resolve_btn(code)
+        if action:
+            if self.locked:
+                log(f"lock btn {name} → {action}")
+            self.do_action(action)
+
+    def on_hat(self, code: int, value: int) -> None:
+        if code == ecodes.ABS_HAT0X:
+            self.hat["x"] = value
+            key = f"ABS_HAT0X:{value}"
+        elif code == ecodes.ABS_HAT0Y:
+            self.hat["y"] = value
+            key = f"ABS_HAT0Y:{value}"
+        else:
+            return
+        if value == 0:
+            if code == ecodes.ABS_HAT0Y:
+                self._hat_y_action = None
+                self._hat_repeat_at = 0.0
+            return
+        if not self.locked:
+            self._mark_chord()
+        action = self.resolve_name(key)
+        if action:
+            self.do_action(action)
+            # Hold-to-repeat for vertical scroll (and any other Y bind).
+            if code == ecodes.ABS_HAT0Y and action.startswith("scroll_"):
+                self._hat_y_action = action
+                self._hat_repeat_at = time.monotonic() + 0.35
+
+    def tick_hat_repeat(self) -> None:
+        if self.paused or self.locked or not self._hat_y_action:
+            return
+        if self.hat.get("y", 0) == 0:
+            self._hat_y_action = None
+            return
+        now = time.monotonic()
+        if now < self._hat_repeat_at:
+            return
+        self.do_action(self._hat_y_action)
+        self._hat_repeat_at = now + 0.09
+
+    def on_axis(self, code: int, value: int) -> None:
+        n = self.axis_norm(code, value)
+        if code == ecodes.ABS_X:
+            self.axes["x"] = n
+        elif code == ecodes.ABS_Y:
+            self.axes["y"] = n
+        elif code == ecodes.ABS_RX:
+            self.axes["rx"] = n
+        elif code == ecodes.ABS_RY:
+            self.axes["ry"] = n
+        elif code == ecodes.ABS_Z:
+            self._trigger_edge("lt", n, "TRIGGER_LT")
+        elif code == ecodes.ABS_RZ:
+            self._trigger_edge("rt", n, "TRIGGER_RT")
+
+    def _trigger_edge(self, which: str, norm: float, bind_name: str) -> None:
+        # On lock screen RT confirms the pending digit (analog triggers).
+        if self.paused:
+            return
+        down = norm >= self.trigger_threshold
+        prev = self.trigger_down[which]
+        self.trigger_down[which] = down
+        if down and not prev:
+            if self.locked:
+                if which == "rt":
+                    self.do_action("lock_digit_confirm")
+                elif which == "lt":
+                    self.do_action("lock_backspace")
+                return
+            self._mark_chord()
+            action = self.resolve_name(bind_name)
+            if action:
+                self.do_action(action)
+
+    def tick_mouse(self) -> None:
+        if self.paused or self.locked:
+            return
+        lx, ly = self.axes["x"], self.axes["y"]
+        rx, ry = self.axes["rx"], self.axes["ry"]
+        dx = rx * self.mouse_speed * 1.2
+        dy = ry * self.mouse_speed * 1.2
+        if self.guide_down or not self.mouse_with_guide:
+            dx += lx * self.mouse_speed
+            dy += ly * self.mouse_speed
+        self.move_mouse(dx, dy)
+
+    def refresh_pause(self) -> None:
+        # Lock wins over game-focus pause: we must keep the grab to type a PIN.
+        locked = session_locked()
+        if locked != self.locked:
+            self.locked = locked
+            if locked:
+                self.lock_digit = 0
+                self.paused = False
+                self.guide_down = False
+                self.set_grab(True)
+                log("lock screen — PIN pad mode (D-pad digit, A/RT confirm, B/LT delete, Start unlock)")
+                qs("lock", "pending", "0")
+            else:
+                log("unlocked — desktop mapping")
+                self.guide_down = False
+        if self.locked:
+            return
+        should = focused_should_pause()
+        if should != self.paused:
+            self.paused = should
+            self.set_grab(not should)
+            log("paused for game focus" if should else "resumed desktop mapping")
+
+    def run(self) -> int:
+        if gamescope_active():
+            log("gamescope / gaming session active — exiting (Steam owns controllers)")
+            return 0
+        self.setup_uinput()
+        if not self.open_pad():
+            log("no gamepad found yet; waiting for one…")
+        elif not self.paused:
+            self.set_grab(True)
+        last_scan = 0.0
+        last_pause = 0.0
+        last_mouse = 0.0
+        while not self._stop:
+            if gamescope_active():
+                log("gamescope appeared — exiting")
+                break
+            now = time.monotonic()
+            if self.dev is None and now - last_scan > 2.0:
+                last_scan = now
+                self.open_pad()
+                if self.dev and not self.paused:
+                    self.set_grab(True)
+            if now - last_pause > 0.35:
+                last_pause = now
+                if self.dev:
+                    self.refresh_pause()
+            if self.dev is None:
+                time.sleep(0.3)
+                continue
+            if now - last_mouse > 0.016:
+                last_mouse = now
+                self.tick_mouse()
+                self.tick_hat_repeat()
+            r, _, _ = select.select([self.dev.fd], [], [], 0.02)
+            if not r:
+                continue
+            try:
+                for event in self.dev.read():
+                    if self.paused and not self.locked:
+                        continue
+                    if event.type == ecodes.EV_KEY:
+                        self.on_button(event.code, event.value)
+                    elif event.type == ecodes.EV_ABS:
+                        if event.code in (ecodes.ABS_HAT0X, ecodes.ABS_HAT0Y):
+                            self.on_hat(event.code, event.value)
+                        else:
+                            self.on_axis(event.code, event.value)
+            except OSError:
+                log("device disconnected")
+                try:
+                    if self.grabbed:
+                        self.dev.ungrab()
+                except Exception:
+                    pass
+                self.dev = None
+                self.grabbed = False
+        self.shutdown()
+        return 0
+
+    def shutdown(self) -> None:
+        self._stop = True
+        try:
+            if self.dev and self.grabbed:
+                self.dev.ungrab()
+        except Exception:
+            pass
+        if self.ui:
+            self.ui.close()
+
+
+def which(name: str) -> str | None:
+    from shutil import which as _which
+    return _which(name)
+
+
+def write_pid() -> None:
+    PIDFILE.write_text(str(os.getpid()))
+
+
+def main() -> int:
+    if os.geteuid() == 0:
+        log("do not run as root")
+        return 1
+    profile = load_profile()
+    LAYER.mkdir(parents=True, exist_ok=True)
+    if not PROFILE_PATH.is_file():
+        PROFILE_PATH.write_text(json.dumps(DEFAULT_PROFILE, indent=2) + "\n")
+
+    ctl = ControllerDesktop(profile)
+
+    def handle_sig(_s, _f):
+        ctl._stop = True
+
+    signal.signal(signal.SIGTERM, handle_sig)
+    signal.signal(signal.SIGINT, handle_sig)
+    write_pid()
+    try:
+        return ctl.run()
+    finally:
+        try:
+            PIDFILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())

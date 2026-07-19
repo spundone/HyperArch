@@ -235,6 +235,46 @@ CLI: `hyperwebster-omarchy-menu`, `hyperwebster-pkg-install`, `hyperwebster-pkg-
 
 CLI: `hyperwebster-maint`, `hyperwebster-input-remap`, `hyperwebster-theme`, `btrfs-assistant`, `hyperwebster-zephyr-polish {enable|disable}`.
 
+## 12e. Controller desktop (HyperWebster)
+
+Xbox-layout gamepad → Hyprland / Caelestia on the **desktop** session only
+(Gamescope / Steam GamepadUI analogues). Paused for Steam/Proton games; off
+under Starman/gamescope. On the **lock screen**, the pad enters PIN mode.
+Toggle: Additions → Controller desktop.
+
+Hold a modifier for a layer; release alone for the base action. Covers the
+bulk of the tables above (shell, windows, apps, media, screenshots,
+volume/brightness) - not every Super+N workspace bind.
+
+| Hold | Layer | Release alone |
+|------|--------|---------------|
+| Guide | System (Starman, lock, shots, vol/bright, mute, suspend) | Launcher |
+| Select | Shell (sidebar, notifs, clipboard, emoji, night light, scratchpad, copy/paste) | Dashboard |
+| Start | Windows (move, float, split, pin, resize, group, movetoworkspace) | Overview |
+| Y | Apps & media (terminal, browser, files, editor, music, activity, audio, install, todo, transport) | Settings |
+
+| Base | Action |
+|------|--------|
+| A / B / X | Enter / Esc / Tab |
+| D-pad L/R | Focus window |
+| D-pad U/D | Scroll (wheel + ↑/↓) |
+| LB / RB | Workspace ± |
+| L3 / R3 | Keybinds / fullscreen |
+| Right stick · Guide+left stick | Mouse |
+| LT / RT | Right / left click |
+
+Full chord tables: `controller-desktop/README.md`.
+Profile: `~/.local/share/hyperwebster/controller-desktop/profile.json`.
+
+| Gamepad | Lock screen (PIN) |
+|---------|-------------------|
+| D-pad / LB / RB | Cycle digit 0–9 |
+| A | Type pending digit |
+| B | Backspace |
+| Y | Type `0` |
+| Start / Guide | Submit |
+| Select | Clear field |
+
 ## 13. Power
 
 | Keys | Action |

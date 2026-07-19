@@ -1,0 +1,76 @@
+#!/bin/bash
+# hyperwebster-controller-desktop-toggle — enable/disable desktop gamepad UX.
+set -euo pipefail
+
+BIN="${HOME}/.local/bin/hyperwebster-controller-desktop"
+UNIT_SRC="${HOME}/.local/share/hyperwebster/controller-desktop/hyperwebster-controller-desktop.service"
+UNIT_DST="${HOME}/.config/systemd/user/hyperwebster-controller-desktop.service"
+STATE="${HOME}/.local/state/hyperwebster/controller-desktop-enabled"
+HYPRUSER="${HOME}/.config/caelestia/hypr-user.conf"
+MARK_BEGIN='# >>> controller-desktop >>>'
+MARK_END='# <<< controller-desktop <<<'
+
+usage() {
+  echo "Usage: hyperwebster-controller-desktop-toggle {enable|disable|status|toggle|restart}" >&2
+}
+
+ensure_unit() {
+  mkdir -p "$(dirname "$UNIT_DST")"
+  if [ -f "$UNIT_SRC" ]; then
+    install -m 0644 "$UNIT_SRC" "$UNIT_DST"
+  fi
+  systemctl --user daemon-reload 2>/dev/null || true
+}
+
+set_hypr_autostart() {
+  local on="$1"
+  [ -f "$HYPRUSER" ] || return 0
+  sed -i "/$MARK_BEGIN/,/$MARK_END/d" "$HYPRUSER" 2>/dev/null || true
+  if [ "$on" = 1 ]; then
+    cat >> "$HYPRUSER" <<EOF
+
+$MARK_BEGIN
+# Desktop gamepad mapper (paused for Steam games; never under gamescope).
+exec-once = systemctl --user start hyperwebster-controller-desktop.service
+$MARK_END
+EOF
+  fi
+}
+
+apply() {
+  local on="$1"
+  mkdir -p "$(dirname "$STATE")"
+  echo "$on" > "$STATE"
+  ensure_unit
+  set_hypr_autostart "$on"
+  if [ "$on" = 1 ]; then
+    systemctl --user enable --now hyperwebster-controller-desktop.service 2>/dev/null \
+      || systemctl --user restart hyperwebster-controller-desktop.service
+    echo "Controller desktop mapping enabled."
+    echo "Guide=launcher  A=Enter  B=Esc  Y=Settings  D-pad=focus  LB/RB=workspace"
+    echo "Guide+Start = switch to Starman / gamescope (Steam owns pads there)."
+  else
+    systemctl --user disable --now hyperwebster-controller-desktop.service 2>/dev/null || true
+    echo "Controller desktop mapping disabled."
+  fi
+}
+
+case "${1:-}" in
+  enable) apply 1 ;;
+  disable) apply 0 ;;
+  restart)
+    ensure_unit
+    systemctl --user restart hyperwebster-controller-desktop.service
+    ;;
+  toggle)
+    if [ -f "$STATE" ] && [ "$(cat "$STATE")" = 1 ]; then apply 0; else apply 1; fi
+    ;;
+  status)
+    if systemctl --user is-active --quiet hyperwebster-controller-desktop.service 2>/dev/null; then
+      echo enabled; exit 0
+    fi
+    if [ -f "$STATE" ] && [ "$(cat "$STATE")" = 1 ]; then echo enabled; exit 0; fi
+    echo disabled; exit 1
+    ;;
+  *) usage; exit 1 ;;
+esac
