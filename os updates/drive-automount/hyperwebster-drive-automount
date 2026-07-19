@@ -1,7 +1,8 @@
 #!/bin/bash
 # hyperwebster-drive-automount — mount non-system data drives at boot.
 # Regenerates /etc/fstab.d/99-hyperwebster-automount.conf and mounts entries.
-# Skips root, boot/EFI, LUKS containers, swap, optical/loop, and ignored UUIDs.
+# Discovery uses lsblk JSON (not whitespace-split lsblk -f) so labels with
+# spaces (e.g. "WD HDD") parse correctly.
 set -euo pipefail
 
 FSTAB_FRAGMENT=/etc/fstab.d/99-hyperwebster-automount.conf
@@ -9,10 +10,16 @@ IGNORE_FILE=/etc/hyperwebster/drive-automount-ignore
 MOUNT_ROOT=/mnt
 ALLOW_RE='^(ext4|btrfs|xfs|vfat|exfat|ntfs|ntfs3|f2fs)$'
 FAT_RE='^(exfat|vfat|ntfs|ntfs3)$'
+MIN_SIZE=1073741824  # 1 GiB
+
+# GPT partition type GUIDs (lowercase).
+GPT_ESP='c12a7328-f81f-11d2-ba4b-00a0c93ec93b'
+GPT_MSR='e3c9e316-eb47-4664-a4cf-b912b4479a91'
+GPT_WINRE='de94bba4-06d1-4d40-a16a-bfd50179d6ac'
 
 sanitize_name() {
   local label="$1" uuid="$2"
-  local name
+  local name=""
   if [ -n "$label" ]; then
     name=$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//')
   fi
@@ -37,6 +44,21 @@ is_ignored() {
   grep -qiE "^[[:space:]]*${uuid}([[:space:]]|#|$)" "$IGNORE_FILE" 2>/dev/null
 }
 
+ntfs3_available() {
+  grep -qw ntfs3 /proc/filesystems 2>/dev/null && return 0
+  modprobe ntfs3 >/dev/null 2>&1 || true
+  grep -qw ntfs3 /proc/filesystems 2>/dev/null
+}
+
+prefer_fstype() {
+  local fst="$1"
+  if [ "$fst" = "ntfs" ] && ntfs3_available; then
+    printf 'ntfs3'
+  else
+    printf '%s' "$fst"
+  fi
+}
+
 mount_opts_for() {
   local fst="$1" uid="$2" gid="$3"
   local base="nofail,x-systemd.device-timeout=5,x-gvfs-show"
@@ -48,6 +70,10 @@ mount_opts_for() {
   fi
 }
 
+log_fail() {
+  echo "hyperwebster-drive-automount: FAIL: $*" >&2
+}
+
 declare -A SKIP_DEVS=()
 
 add_skip_tree() {
@@ -55,9 +81,9 @@ add_skip_tree() {
   [ -z "$src" ] && return 0
   src="${src%%\[*}"
   SKIP_DEVS["$src"]=1
-  name=$(lsblk -no NAME "$src" 2>/dev/null | head -1) || return 0
+  name=$(lsblk -ln -o NAME "$src" 2>/dev/null | head -1) || return 0
   [ -n "$name" ] && SKIP_DEVS["/dev/$name"]=1
-  pk=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1) || true
+  pk=$(lsblk -ln -o PKNAME "$src" 2>/dev/null | head -1) || true
   [ -n "$pk" ] && SKIP_DEVS["/dev/$pk"]=1
 }
 
@@ -91,12 +117,91 @@ tmp=$(mktemp)
 {
   echo "# HyperWebster drive automount — managed by hyperwebster-drive-automount.service"
   echo "# Data partitions mount under ${MOUNT_ROOT}/<label> with nofail."
+  echo "# Discovery: lsblk -Jb + python3 TSV (labels with spaces are safe)."
   echo "# FAT/NTFS get uid/gid of the primary desktop user for Steam library writes."
 } > "$tmp"
 
 declare -A NEW_MPS=()
+declare -A USED_NAMES=()
 
-while read -r name fstype label uuid mountpoint parttype; do
+# Emit TSV: name\tfstype\tlabel\tuuid\tmountpoint\tsize\tparttype
+# Walks lsblk JSON so NAME is never tree-glyph corrupted and LABEL may contain spaces.
+discover_tsv() {
+  python3 - <<'PY'
+import json, subprocess, sys
+
+SKIP_MPS = {"/", "/boot", "/home", "/.snapshots", "/var/log"}
+ALLOW = {"ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "ntfs3", "f2fs"}
+GPT_SKIP = {
+    "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",  # ESP
+    "e3c9e316-eb47-4664-a4cf-b912b4479a91",  # MSR
+    "de94bba4-06d1-4d40-a16a-bfd50179d6ac",  # WinRE
+}
+MIN_SIZE = 1073741824  # 1 GiB
+
+try:
+    raw = subprocess.check_output(
+        ["lsblk", "-Jb", "-o", "NAME,FSTYPE,LABEL,UUID,MOUNTPOINT,SIZE,PARTTYPE,TYPE"],
+        text=True,
+    )
+    data = json.loads(raw)
+except Exception as e:
+    print(f"hyperwebster-drive-automount: lsblk JSON failed: {e}", file=sys.stderr)
+    sys.exit(1)
+
+def walk(nodes, parent_skip=False):
+    for n in nodes or []:
+        typ = (n.get("type") or "") or ""
+        if typ in ("rom", "loop"):
+            continue
+        mp = (n.get("mountpoint") or "") or ""
+        if mp in SKIP_MPS or mp.startswith("/boot"):
+            walk(n.get("children"), True)
+            continue
+        if parent_skip:
+            walk(n.get("children"), True)
+            continue
+
+        fst = (n.get("fstype") or "") or ""
+        uuid = (n.get("uuid") or "") or ""
+        label = (n.get("label") or "") or ""
+        parttype = ((n.get("parttype") or "") or "").lower()
+        size = int(n.get("size") or 0)
+        name = (n.get("name") or "") or ""
+
+        if uuid and fst and fst in ALLOW:
+            skip = False
+            if parttype in GPT_SKIP:
+                skip = True
+            elif "esp" in parttype or parttype.endswith("efi"):
+                skip = True
+            elif size < MIN_SIZE:
+                skip = True
+            else:
+                lab_l = label.lower().strip()
+                if lab_l in ("vtoyefi", "efi"):
+                    skip = True
+            if not skip:
+                # Tabs cannot appear in these fields from lsblk; still sanitize.
+                def clean(s):
+                    return s.replace("\t", " ").replace("\n", " ").replace("\r", "")
+                print("\t".join([
+                    clean(name),
+                    clean(fst),
+                    clean(label),
+                    clean(uuid),
+                    clean(mp),
+                    str(size),
+                    clean(parttype),
+                ]))
+        walk(n.get("children"), False)
+
+walk(data.get("blockdevices"))
+PY
+}
+
+while IFS=$'\t' read -r name fstype label uuid mountpoint size parttype || [ -n "${name:-}" ]; do
+  [ -n "${name:-}" ] || continue
   [ -n "$fstype" ] || continue
   [[ "$fstype" =~ $ALLOW_RE ]] || continue
   [ "$fstype" = "swap" ] && continue
@@ -106,6 +211,23 @@ while read -r name fstype label uuid mountpoint parttype; do
     continue
   fi
 
+  parttype_l=$(printf '%s' "${parttype:-}" | tr '[:upper:]' '[:lower:]')
+  case "$parttype_l" in
+    "$GPT_ESP"|"$GPT_MSR"|"$GPT_WINRE") continue ;;
+  esac
+  if [[ "$parttype_l" == *esp* || "$parttype_l" == *efi* ]]; then
+    continue
+  fi
+
+  if [ "${size:-0}" -lt "$MIN_SIZE" ] 2>/dev/null; then
+    continue
+  fi
+
+  label_l=$(printf '%s' "${label:-}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  case "$label_l" in
+    vtoyefi|efi) continue ;;
+  esac
+
   dev="/dev/$name"
   [ -n "${SKIP_DEVS[$dev]:-}" ] && continue
 
@@ -114,23 +236,18 @@ while read -r name fstype label uuid mountpoint parttype; do
     continue
   fi
 
-  # Skip EFI system partitions (vfat marked as ESP).
-  if [ "$fstype" = "vfat" ] && [[ "${parttype:-}" == *"esp"* || "${parttype:-}" == *"EFI"* ]]; then
-    continue
-  fi
-  # Skip tiny vfat slices that are likely EFI leftovers.
-  if [ "$fstype" = "vfat" ]; then
-    size=$(lsblk -b -dn -o SIZE "$dev" 2>/dev/null || echo 0)
-    [ "${size:-0}" -lt 536870912 ] && continue
-  fi
-
+  fstype=$(prefer_fstype "$fstype")
   target_name=$(sanitize_name "$label" "$uuid")
+  if [ -n "${USED_NAMES[$target_name]:-}" ]; then
+    target_name="${target_name}-${uuid:0:8}"
+  fi
+  USED_NAMES["$target_name"]=1
   target="${MOUNT_ROOT}/${target_name}"
   opts=$(mount_opts_for "$fstype" "${USER_UID:-}" "${USER_GID:-}")
   mkdir -p "$target"
   echo "UUID=$uuid $target $fstype $opts 0 0" >> "$tmp"
   NEW_MPS["$target"]=1
-done < <(lsblk -f -n -o NAME,FSTYPE,LABEL,UUID,MOUNTPOINT,PARTTYPE)
+done < <(discover_tsv)
 
 install -Dm0644 "$tmp" "$FSTAB_FRAGMENT"
 rm -f "$tmp"
@@ -145,8 +262,40 @@ for mp in "${!PREV_MPS[@]}"; do
   fi
 done
 
+planned=0
+mounted=0
+failed=0
+
+try_mount() {
+  local fst="$1" opts="$2" uuid="$3" mp="$4"
+  local err
+  if err=$(mount -t "$fst" -o "$opts" "UUID=$uuid" "$mp" 2>&1); then
+    return 0
+  fi
+  # NTFS: prefer ntfs3, fall back to ntfs-3g / ntfs fuse.
+  if [ "$fst" = "ntfs3" ] || [ "$fst" = "ntfs" ]; then
+    if command -v mount.ntfs-3g >/dev/null 2>&1; then
+      if err=$(mount.ntfs-3g -o "$opts" "UUID=$uuid" "$mp" 2>&1); then
+        echo "hyperwebster-drive-automount: mounted $mp via ntfs-3g (ntfs3 unavailable or failed)" >&2
+        return 0
+      fi
+      log_fail "UUID=$uuid -> $mp (ntfs3 and ntfs-3g): $err"
+      return 1
+    fi
+    if [ "$fst" = "ntfs3" ]; then
+      if err=$(mount -t ntfs -o "$opts" "UUID=$uuid" "$mp" 2>&1); then
+        echo "hyperwebster-drive-automount: mounted $mp via ntfs (ntfs3 failed)" >&2
+        return 0
+      fi
+    fi
+  fi
+  log_fail "UUID=$uuid -> $mp ($fst): $err"
+  return 1
+}
+
 while read -r line; do
   [[ "$line" =~ ^UUID= ]] || continue
+  planned=$((planned + 1))
   uuid=${line#UUID=}; uuid=${uuid%% *}
   mp=$(awk '{print $2}' <<<"$line")
   fst=$(awk '{print $3}' <<<"$line")
@@ -156,12 +305,25 @@ while read -r line; do
   if findmnt -rn "$mp" >/dev/null 2>&1 || mountpoint -q "$mp" 2>/dev/null; then
     # Refresh FAT/NTFS uid/gid without a full unmount when possible.
     if [[ "$fst" =~ $FAT_RE ]]; then
-      mount -t "$fst" -o "remount,$opts" "$mp" 2>/dev/null \
-        || { umount "$mp" 2>/dev/null || true; mount -t "$fst" -o "$opts" "UUID=$uuid" "$mp" 2>/dev/null || true; }
+      if ! mount -t "$fst" -o "remount,$opts" "$mp" 2>/dev/null; then
+        umount "$mp" 2>/dev/null || true
+        if try_mount "$fst" "$opts" "$uuid" "$mp"; then
+          mounted=$((mounted + 1))
+        else
+          failed=$((failed + 1))
+        fi
+        continue
+      fi
     fi
+    mounted=$((mounted + 1))
     continue
   fi
-  mount -t "$fst" -o "$opts" "UUID=$uuid" "$mp" 2>/dev/null || true
+
+  if try_mount "$fst" "$opts" "$uuid" "$mp"; then
+    mounted=$((mounted + 1))
+  else
+    failed=$((failed + 1))
+  fi
 done < "$FSTAB_FRAGMENT"
 
-echo "hyperwebster-drive-automount: synced $(grep -c '^UUID=' "$FSTAB_FRAGMENT" 2>/dev/null || echo 0) data mount(s)"
+echo "hyperwebster-drive-automount: planned $planned, mounted $mounted, failed $failed"

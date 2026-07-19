@@ -2,19 +2,26 @@
 
 On boot, discovers **non-system** block devices with a supported filesystem and
 mounts them under `/mnt/<label>` (or `/mnt/disk-<uuid8>` when unlabeled).
+Labels with spaces (e.g. `WD HDD`) become sanitized paths like `/mnt/wd-hdd`.
 
 ## Behaviour
 
+- Discovers disks via `lsblk -Jb` (JSON) piped through python3 TSV so labels
+  with spaces and nested partition trees parse correctly (no whitespace `read`
+  on `lsblk -f` columns).
 - Writes `/etc/fstab.d/99-hyperwebster-automount.conf` (regenerated each boot).
 - Uses `nofail` and `x-systemd.device-timeout=5` so a missing drive never blocks boot.
 - Runs **before** SDDM / the display manager so Starman and gamescope see
   `/mnt/...` when the session starts.
 - Skips: root, `/boot`, `/home`, snapshots, log subvolumes, swap, LUKS headers,
-  loop/sr/zram, EFI vfat partitions, and UUIDs listed in
-  `/etc/hyperwebster/drive-automount-ignore`.
+  loop/sr/zram, GPT ESP/MSR/WinRE, volumes under 1 GiB, labels `vtoyefi`/`efi`,
+  and UUIDs listed in `/etc/hyperwebster/drive-automount-ignore`.
 - Supported types: `ext4`, `btrfs`, `xfs`, `vfat` (non-EFI), `exfat`, `ntfs`/`ntfs3`, `f2fs`.
+- **NTFS** prefers the kernel `ntfs3` driver when available, with `ntfs-3g` fallback.
 - **exFAT / vfat / NTFS** mount with `uid=`/`gid=` of the primary desktop user
   (wheel member preferred) so Steam can write library metadata under `/mnt/...`.
+- Duplicate sanitized names get a `-<uuid8>` suffix. Mount failures are logged;
+  the summary line is `planned N, mounted M, failed F`.
 
 Install `ntfs-3g` / `exfatprogs` from the repos if you attach NTFS/exFAT game libraries.
 
