@@ -117,19 +117,23 @@ tmp=$(mktemp)
 {
   echo "# HyperWebster drive automount — managed by hyperwebster-drive-automount.service"
   echo "# Data partitions mount under ${MOUNT_ROOT}/<label> with nofail."
-  echo "# Discovery: lsblk -Jb + python3 TSV (labels with spaces are safe)."
+  echo "# Discovery: lsblk -Jb + python3 USV (labels with spaces; empty fields safe)."
   echo "# FAT/NTFS get uid/gid of the primary desktop user for Steam library writes."
 } > "$tmp"
 
 declare -A NEW_MPS=()
 declare -A USED_NAMES=()
 
-# Emit TSV: name\tfstype\tlabel\tuuid\tmountpoint\tsize\tparttype
+# Emit USV (unit-separator): name, fstype, label, uuid, mountpoint, size, parttype.
+# Do NOT use tab-separated values: bash IFS=$'\t' treats tab as IFS whitespace and
+# collapses consecutive tabs, dropping empty mountpoint and shifting size into mp —
+# which then fails the "already mounted elsewhere" check and mounts nothing.
 # Walks lsblk JSON so NAME is never tree-glyph corrupted and LABEL may contain spaces.
 discover_tsv() {
   python3 - <<'PY'
 import json, subprocess, sys
 
+SEP = "\x1f"
 SKIP_MPS = {"/", "/boot", "/home", "/.snapshots", "/var/log"}
 ALLOW = {"ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "ntfs3", "f2fs"}
 GPT_SKIP = {
@@ -182,10 +186,14 @@ def walk(nodes, parent_skip=False):
                 if lab_l in ("vtoyefi", "efi"):
                     skip = True
             if not skip:
-                # Tabs cannot appear in these fields from lsblk; still sanitize.
                 def clean(s):
-                    return s.replace("\t", " ").replace("\n", " ").replace("\r", "")
-                print("\t".join([
+                    return (
+                        s.replace(SEP, " ")
+                        .replace("\t", " ")
+                        .replace("\n", " ")
+                        .replace("\r", "")
+                    )
+                print(SEP.join([
                     clean(name),
                     clean(fst),
                     clean(label),
@@ -200,7 +208,7 @@ walk(data.get("blockdevices"))
 PY
 }
 
-while IFS=$'\t' read -r name fstype label uuid mountpoint size parttype || [ -n "${name:-}" ]; do
+while IFS=$'\x1f' read -r name fstype label uuid mountpoint size parttype || [ -n "${name:-}" ]; do
   [ -n "${name:-}" ] || continue
   [ -n "$fstype" ] || continue
   [[ "$fstype" =~ $ALLOW_RE ]] || continue

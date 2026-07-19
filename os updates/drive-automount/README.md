@@ -6,9 +6,10 @@ Labels with spaces (e.g. `WD HDD`) become sanitized paths like `/mnt/wd-hdd`.
 
 ## Behaviour
 
-- Discovers disks via `lsblk -Jb` (JSON) piped through python3 TSV so labels
-  with spaces and nested partition trees parse correctly (no whitespace `read`
-  on `lsblk -f` columns).
+- Discovers disks via `lsblk -Jb` (JSON) piped through python3 with
+  unit-separator (`US`, `\x1f`) fields so labels with spaces and **empty**
+  mountpoints parse correctly. (Bash `IFS=$'\t'` collapses consecutive tabs,
+  which previously dropped empty mount fields and skipped every drive.)
 - Writes `/etc/fstab.d/99-hyperwebster-automount.conf` (regenerated each boot).
 - Uses `nofail` and `x-systemd.device-timeout=5` so a missing drive never blocks boot.
 - Runs **before** SDDM / the display manager so Starman and gamescope see

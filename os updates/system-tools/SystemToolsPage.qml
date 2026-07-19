@@ -49,12 +49,42 @@ PageBase {
     }
 
     function openTui(argv): void {
-        const cmd = ["kitty", "--class", "TUI.float", "-e"].concat(argv);
-        Quickshell.execDetached(cmd);
+        // Quickshell often inherits PATH without ~/.local/bin. Resolve
+        // HyperWebster helpers to absolute paths so kitty does not flash-exit.
+        const home = Paths.home;
+        const resolved = argv.map(a => {
+            if (typeof a !== "string")
+                return a;
+            if (a.startsWith("/") || a.startsWith("-"))
+                return a;
+            if (a.indexOf("hyperwebster-") === 0)
+                return `${home}/.local/bin/${a}`;
+            return a;
+        });
+        // Dismiss Nexus first — layer-shell settings sit above normal windows,
+        // so a TUI.float launched while Settings is open looks like a no-op.
+        try {
+            root.nState.close();
+        } catch (e) {}
+        Quickshell.execDetached(["kitty", "--class", "TUI.float", "-e"].concat(resolved));
     }
 
     function openGui(bin): void {
-        Quickshell.execDetached(["sh", "-c", "command -v \"$1\" >/dev/null && exec \"$1\" || notify-send -u critical 'System tools' \"$1 is not installed\"", "sh", bin]);
+        // Dismiss Nexus so Qt apps are not hidden under the settings layer.
+        try {
+            root.nState.close();
+        } catch (e) {}
+        // Launch in background; only notify if the process dies within ~1s
+        // (missing binary, ABI crash). Do not wait for a normal GUI exit.
+        Quickshell.execDetached(["sh", "-c",
+            'bin="$1"; command -v "$bin" >/dev/null || { notify-send -u critical "System tools" "$bin is not installed"; exit 1; }; '
+            + 'err=$(mktemp); "$bin" >"$err" 2>&1 & pid=$!; sleep 0.9; '
+            + 'if kill -0 "$pid" 2>/dev/null; then rm -f "$err"; exit 0; fi; '
+            + 'wait "$pid" 2>/dev/null || true; msg=$(head -c 240 "$err"); rm -f "$err"; '
+            + 'case "$msg" in *alpm_pkg_get_installed_db*) '
+            + 'notify-send -u critical "Kernel manager" "Needs CachyOS pacman. Run: sudo hyperwebster-cachy-repo fix-pacman";; '
+            + '*) notify-send -u critical "System tools" "${msg:-$bin failed to start}";; esac',
+            "sh", bin]);
     }
 
     // Non-visual objects MUST live inside the layout. PageBase's default
