@@ -1,0 +1,94 @@
+#!/bin/bash
+# hyperwebster-button-scroll-toggle — hold middle mouse + move to scroll.
+set -euo pipefail
+
+LAYER="${HOME}/.local/share/hyperwebster/button-scroll"
+HYPRUSER="${HOME}/.config/caelestia/hypr-user.conf"
+STATE="${HOME}/.local/state/hyperwebster/button-scroll-enabled"
+MARK_BEGIN='# >>> button-scroll >>>'
+MARK_END='# <<< button-scroll <<<'
+
+usage() {
+  echo "Usage: hyperwebster-button-scroll-toggle {enable|disable|status|toggle}" >&2
+}
+
+set_hypr() {
+  local on="$1"
+  [ -f "$HYPRUSER" ] || {
+    mkdir -p "$(dirname "$HYPRUSER")"
+    : > "$HYPRUSER"
+  }
+  # Keep a copy under the layer for docs/editing; Hyprland sources the inline
+  # block so a missing layer file cannot break hyprland.conf (source glob error).
+  mkdir -p "$LAYER"
+  if [ -f "$(dirname "$0")/hypr-button-scroll.conf" ]; then
+    cp -f "$(dirname "$0")/hypr-button-scroll.conf" "$LAYER/hypr-button-scroll.conf" 2>/dev/null || true
+  fi
+  if [ ! -f "$LAYER/hypr-button-scroll.conf" ]; then
+    cat > "$LAYER/hypr-button-scroll.conf" <<'CONFEOF'
+# HyperWebster — middle-button drag-to-scroll
+input {
+    scroll_method = on_button_down
+    scroll_button = 274
+    scroll_button_lock = false
+}
+CONFEOF
+  fi
+  # Always strip first so enable refreshes cleanly.
+  sed -i "/$MARK_BEGIN/,/$MARK_END/d" "$HYPRUSER" 2>/dev/null || true
+  if [ "$on" = 1 ]; then
+    # Inline settings — do not `source =` an external path (Hyprland errors the
+    # whole hypr-user.conf load if that file is missing).
+    cat >> "$HYPRUSER" <<EOF
+
+$MARK_BEGIN
+# Hold middle mouse (274) and move to scroll. Edit here or re-run the toggle.
+input {
+    scroll_method = on_button_down
+    scroll_button = 274
+    scroll_button_lock = false
+}
+$MARK_END
+EOF
+  fi
+}
+
+reload_hypr() {
+  local sig=""
+  if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    hyprctl reload >/dev/null 2>&1 || true
+    return 0
+  fi
+  # When invoked from Nexus/Additions without Hyprland env, find the session.
+  sig=$(find /run/user/"$(id -u)"/hypr -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
+  if [ -n "$sig" ] && command -v hyprctl >/dev/null 2>&1; then
+    HYPRLAND_INSTANCE_SIGNATURE=$(basename "$sig") hyprctl reload >/dev/null 2>&1 || true
+  fi
+}
+
+apply() {
+  local on="$1"
+  mkdir -p "$(dirname "$STATE")" "$LAYER"
+  echo "$on" > "$STATE"
+  set_hypr "$on"
+  reload_hypr
+  if [ "$on" = 1 ]; then
+    echo "Middle-button scroll enabled — hold middle click and move to scroll."
+  else
+    echo "Middle-button scroll disabled."
+  fi
+}
+
+case "${1:-}" in
+  enable) apply 1 ;;
+  disable) apply 0 ;;
+  toggle)
+    if [ -f "$STATE" ] && [ "$(cat "$STATE")" = 1 ]; then apply 0; else apply 1; fi
+    ;;
+  status)
+    if [ -f "$STATE" ] && [ "$(cat "$STATE")" = 1 ]; then echo enabled; exit 0; fi
+    if [ -f "$HYPRUSER" ] && grep -qF "$MARK_BEGIN" "$HYPRUSER"; then echo enabled; exit 0; fi
+    echo disabled; exit 1
+    ;;
+  *) usage; exit 1 ;;
+esac
