@@ -437,6 +437,16 @@ WlSessionLockSurface {
 
         StyledText {
             Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: 10
+            text: qsTr("Pad digit  %1   ·  A / RT confirm").arg(root.pam.pendingDigit)
+            color: Theme.textMuted
+            font.family: Theme.font.family
+            font.pixelSize: 13
+            font.letterSpacing: 1
+        }
+
+        StyledText {
+            Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 8
             Layout.preferredHeight: 14
             text: root.errored ? qsTr("Incorrect — try again") : (root.pam.lockMessage || "")
@@ -501,7 +511,7 @@ WlSessionLockSurface {
         }
 
         StyledText {
-            text: qsTr("Press Enter to unlock")
+            text: qsTr("Enter · D-pad digit · A/RT type · B/LT delete · Start unlock")
             color: Theme.textFaint
             font.family: Theme.font.family
             font.pixelSize: 11

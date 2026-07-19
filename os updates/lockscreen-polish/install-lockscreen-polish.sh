@@ -26,7 +26,10 @@ fi
 
 mkdir -p "$SHARE"
 hw_install_file "$SRC/LockSurface.qml" "$SHARE/LockSurface.qml" 0644
+hw_install_file "$SRC/Lock.qml" "$SHARE/Lock.qml" 0644
+hw_install_file "$SRC/Pam.qml" "$SHARE/Pam.qml" 0644
 hw_install_file "$SRC/patch-locksurface.sh" "$SHARE/patch-locksurface.sh" 0755
+hw_install_file "$SRC/patch-lock-ipc.sh" "$SHARE/patch-lock-ipc.sh" 0755
 hw_install_file "$SRC/README.md" "$SHARE/README.md" 0644
 
 # Ensure Starman logo exists for the lock avatar.
@@ -40,6 +43,7 @@ if [ -n "${HYPERWEBSTER_SKIP_SHELL_PATCH:-}" ]; then
   echo ":: skipping lock surface patch (HYPERWEBSTER_SKIP_SHELL_PATCH)"
 else
   sudo sh "$SHARE/patch-locksurface.sh"
+  sudo sh "$SHARE/patch-lock-ipc.sh"
 fi
 
 HOOK=/etc/pacman.d/hooks/hyperwebster-lockscreen-polish.hook
