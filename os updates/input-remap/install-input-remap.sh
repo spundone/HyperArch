@@ -50,10 +50,17 @@ sudo systemctl enable --now keyd 2>/dev/null \
   && echo ":: keyd enabled" \
   || echo "NOTE: enable later with: sudo systemctl enable --now keyd"
 
-# Hyprland bind
+# Hyprland bind — always rewrite the marked block so PATH fixes apply.
 if [ -f "$HYPRUSER" ]; then
   if grep -qF "$MARK_BEGIN" "$HYPRUSER"; then
-    echo ":: Super+Ctrl+I bind already present"
+    # Replace existing block in place.
+    tmp=$(mktemp)
+    awk -v begin="$MARK_BEGIN" -v end="$MARK_END" '
+      $0 == begin { skip=1; print; system("cat \"'"$SRC"'/hyprland-input-remap.conf\""); next }
+      $0 == end { skip=0; print; next }
+      !skip { print }
+    ' "$HYPRUSER" > "$tmp" && mv "$tmp" "$HYPRUSER"
+    echo ":: refreshed Super+Ctrl+I bind in $HYPRUSER"
   else
     {
       printf '\n%s\n' "$MARK_BEGIN"
@@ -61,12 +68,24 @@ if [ -f "$HYPRUSER" ]; then
       printf '%s\n' "$MARK_END"
     } >> "$HYPRUSER"
     echo ":: appended Super+Ctrl+I -> $HYPRUSER"
-    if command -v hyprctl >/dev/null 2>&1 && hyprctl version >/dev/null 2>&1; then
-      hyprctl reload >/dev/null 2>&1 || true
-    fi
+  fi
+  if command -v hyprctl >/dev/null 2>&1 && hyprctl version >/dev/null 2>&1; then
+    hyprctl reload >/dev/null 2>&1 || true
   fi
 else
   echo "NOTE: $HYPRUSER missing — bind from hyprland-input-remap.conf manually."
 fi
 
-echo "Done. Open with Super+Ctrl+I or: hyperwebster-input-remap"
+# Ensure TUI.float floats (System tools / Super+Ctrl+I).
+# Do NOT use `focus` / `stayfocused` — invalid in Hyprland 0.55+ match: grammar.
+if [ -f "$HYPRUSER" ] && ! grep -qE 'match:class TUI\\?\.float' "$HYPRUSER"; then
+  {
+    printf '\n# HyperWebster floating TUI terminals\n'
+    printf 'windowrule = float true, match:class TUI\\.float\n'
+    printf 'windowrule = size 1100 700, match:class TUI\\.float\n'
+    printf 'windowrule = center true, match:class TUI\\.float\n'
+  } >> "$HYPRUSER"
+  echo ":: added TUI.float window rules"
+fi
+
+echo "Done. Open with Super+Ctrl+I or: Settings → System tools → Keyboard & mouse"
