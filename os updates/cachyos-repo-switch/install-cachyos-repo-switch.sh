@@ -17,17 +17,25 @@ SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 install -m 0755 "$SELF_DIR/hyperwebster-cachy-repo" /usr/local/bin/hyperwebster-cachy-repo
 echo ":: installed /usr/local/bin/hyperwebster-cachy-repo"
 
-# 1b. standalone DB repair tool. A normal -Syu while
-#     CachyOS is enabled pulls the CachyOS pacman, which stamps `%INSTALLED_DB%`
-#     into the local DB; stock pacman then warns about it on every op. The
-#     corrected helper above pins pacman durably (IgnorePkg) while enabled and
-#     strips the field on disable, but ship the standalone repair tool too — and
-#     one-shot-clean any contamination already present (no-op on a fresh box).
+# 1b. standalone DB repair tool (stock pacman after disable, or leftover
+#     contamination from older pin/unpin cycles). While CachyOS is enabled we
+#     intentionally use CachyOS pacman (kernel-manager ABI). On disable the
+#     helper restores stock pacman and strips `%INSTALLED_DB%`. Ship the
+#     standalone cleaner too — and one-shot-clean if stock pacman is current.
 install -m 0755 "$SELF_DIR/hyperwebster-cachy-db-clean" /usr/local/bin/hyperwebster-cachy-db-clean
 echo ":: installed /usr/local/bin/hyperwebster-cachy-db-clean"
-if grep -lrx '%INSTALLED_DB%' /var/lib/pacman/local/*/desc >/dev/null 2>&1; then
+if ! nm -D /usr/lib/libalpm.so.16 2>/dev/null | grep -q 'T alpm_pkg_get_installed_db$'; then
+  if grep -lrx '%INSTALLED_DB%' /var/lib/pacman/local/*/desc >/dev/null 2>&1; then
     echo ":: local DB has %INSTALLED_DB% contamination — cleaning now…"
     /usr/local/bin/hyperwebster-cachy-db-clean || true
+  fi
+fi
+# If CachyOS is enabled but stock pacman is still pinned, repair libalpm so
+# cachyos-kernel-manager can start.
+if grep -qE '^\[cachyos' /etc/pacman.conf 2>/dev/null \
+  && ! nm -D /usr/lib/libalpm.so.16 2>/dev/null | grep -q 'T alpm_pkg_get_installed_db$'; then
+  echo ":: CachyOS on + stock libalpm — running fix-pacman for kernel-manager…"
+  /usr/local/bin/hyperwebster-cachy-repo fix-pacman || true
 fi
 
 # 2. sudoers drop-in — validate with `visudo -c` BEFORE it reaches /etc/sudoers.d

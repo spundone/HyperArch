@@ -32,19 +32,31 @@ ON runs `pacman -Suu` to swap userspace packages to CachyOS optimized builds.
 
 ## Two design fixes baked in - DO NOT reintroduce the bugs
 1. **Architecture (critical).** CachyOS v3/v4 packages have arch `x86_64_v3`/`x86_64_v4`.
-   Upstream relies on its OWN pacman (reads `Architecture = auto` as "include v3/v4").
-   We keep **stock pacman** (reads `auto` as just `x86_64`) → it would arch-reject every
-   v3/v4 package and the conversion would silently do nothing. So `enable` sets
+   Upstream CachyOS pacman treats `Architecture = auto` as "include v3/v4". Stock
+   Arch pacman treats `auto` as just `x86_64` and would arch-reject every v3/v4
+   package. Offline bootstrap may still run under stock pacman, so `enable` sets
    `Architecture` EXPLICITLY to the tier (`x86_64 x86_64_v3 x86_64_v4` for v4,
    `x86_64 x86_64_v3` for v3); `disable` restores `Architecture = auto`.
 2. **Targeted revert (no whole-base pull).** `disable` reinstalls ONLY packages whose
    local-DB `Packager` is `CachyOS …` (excluding the cachy keyring/mirrorlist pkgs,
    removed separately) - never the full base. Nothing converted ⇒ nothing to do.
 
-## Why stock pacman (and `--ignore pacman`)
-Upstream `cachyos-repo.sh` swaps in a CachyOS `pacman`. We reuse its signed
-keyring/mirrorlists + `.awk` stanza files but drive stock pacman ourselves.
-`enable` runs `pacman -Suu --ignore pacman` and pins pacman via `IgnorePkg`.
+## Why CachyOS pacman while enabled
+Upstream `cachyos-repo.sh` swaps in a CachyOS `pacman`. We do the same while
+repos are ON: CachyOS libalpm exports `alpm_pkg_get_installed_db`, which
+`cachyos-kernel-manager` requires. Stock Arch pacman lacks that symbol, so an
+older HyperWebster pin (`IgnorePkg = pacman`) made the kernel manager fail with
+`undefined symbol: alpm_pkg_get_installed_db`.
+
+`enable` / `fix-pacman` install CachyOS pacman and drop any leftover IgnorePkg
+pin. `disable` restores stock Arch pacman from core, then strips `%INSTALLED_DB%`
+fields so stock libalpm stays quiet.
+
+Repair an existing box without a full re-enable:
+
+```sh
+sudo hyperwebster-cachy-repo fix-pacman
+```
 
 ## Kernel guard
 `enable` installs `linux-cachyos` + `-headers` (limine-mkinitcpio-hook generates

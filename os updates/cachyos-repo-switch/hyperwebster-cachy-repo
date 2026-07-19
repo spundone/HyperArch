@@ -4,24 +4,26 @@
 # Optimized CachyOS repos require x86-64-v3 or newer; below that this refuses.
 #
 # Driven by the sudoless GUI toggle:
-#     sudo -n /usr/local/bin/hyperwebster-cachy-repo {enable|disable|status|detect} [--dry-run]
+#     sudo -n /usr/local/bin/hyperwebster-cachy-repo {enable|disable|status|detect|fix-pacman} [--dry-run]
 #
 # enable: trust keys + install mirrorlists + add repo stanzas, then run
 # `pacman -Suu --noconfirm` to switch the system over to the CachyOS optimized
 # builds — UNATTENDED, so a single toggle flip auto-converts (the GUI still shows
 # the transaction in the floating terminal). --noconfirm auto-accepts any
-# replacements/removals pacman proposes. We do NOT swap in the upstream CachyOS
-# `pacman` package — it is pinned stock via --ignore pacman (keeps the local DB
-# clean). enable also installs the CachyOS kernel (linux-cachyos).
-# disable strips the repos, then reverts ONLY the CachyOS-built packages back to
-# their stock Arch builds (-Suuy for version diffs + a targeted reinstall of the
-# same-version rebuilds, identified by Packager "CachyOS …" in the local DB) and
-# removes the keyring/key — a true round-trip back to stock, UNATTENDED. Touches
-# only what was actually converted (nothing converted => instant, no base pull).
-# A CachyOS-exclusive package with no stock equivalent is auto-skipped + REPORTED
-# (not auto-removed). The CachyOS KERNEL is the exception: disable removes
-# linux-cachyos, but only after confirming stock `linux` is installed so the box
-# stays bootable.
+# replacements/removals pacman proposes. While enabled we install the upstream
+# CachyOS `pacman` (libalpm) — required by `cachyos-kernel-manager`
+# (`alpm_pkg_get_installed_db`). Earlier HyperWebster pins of stock pacman broke
+# the kernel manager; CachyOS pacman also understands `%INSTALLED_DB%` natively.
+# enable also installs the CachyOS kernel (linux-cachyos).
+# disable strips the repos, restores stock Arch pacman, then reverts ONLY the
+# CachyOS-built packages back to their stock Arch builds (-Suuy for version diffs
+# + a targeted reinstall of the same-version rebuilds, identified by Packager
+# "CachyOS …" in the local DB) and removes the keyring/key — a true round-trip
+# back to stock, UNATTENDED. Touches only what was actually converted (nothing
+# converted => instant, no base pull). A CachyOS-exclusive package with no stock
+# equivalent is auto-skipped + REPORTED (not auto-removed). The CachyOS KERNEL is
+# the exception: disable removes linux-cachyos, but only after confirming stock
+# `linux` is installed so the box stays bootable.
 set -u
 
 PACCONF="/etc/pacman.conf"
@@ -50,28 +52,47 @@ detect_tier() {
 
 is_enabled() { grep -qE '^\[cachyos' "$PACCONF" 2>/dev/null; }
 
-# --- durable stock-pacman pin -------------------------------------------------
-# `--ignore pacman` only pins pacman for THIS helper's own transaction. While the
-# CachyOS repos are enabled, a routine `pacman -Syu` / `yay -Syu` / hyperwebster-update
-# upgrades pacman to the CachyOS build, which stamps `%INSTALLED_DB%` into every
-# local-DB entry it touches — stock pacman then warns about that unknown key on
-# EVERY op (a flood that looks exactly like DB corruption). So while enabled we
-# pin pacman in pacman.conf via IgnorePkg too; disable removes the pin. HyperWebster
-# ships no IgnorePkg by default, so we manage a single standalone line.
-ensure_ignore_pacman() {
-  grep -qE '^[[:space:]]*IgnorePkg[[:space:]]*=.*\bpacman\b' "$PACCONF" && return 0
-  if grep -qE '^[[:space:]]*IgnorePkg[[:space:]]*=' "$PACCONF"; then
-    run sed -i -E 's/^([[:space:]]*IgnorePkg[[:space:]]*=.*)$/\1 pacman/' "$PACCONF"
-  else
-    run sed -i -E '/^\[options\]/a IgnorePkg = pacman' "$PACCONF"
-  fi
-}
-
+# --- CachyOS pacman (libalpm) while repos are enabled ---------------------------
+# Stock Arch libalpm lacks `alpm_pkg_get_installed_db`, which
+# `cachyos-kernel-manager` links against. While CachyOS is enabled we therefore
+# install CachyOS pacman (and drop any leftover IgnorePkg pin from older
+# HyperWebster builds). On disable we restore stock pacman from core and strip
+# any `%INSTALLED_DB%` fields stock pacman would warn about.
 remove_ignore_pacman() {
   # remove a standalone `IgnorePkg = pacman` line we added…
   run sed -i -E '/^[[:space:]]*IgnorePkg[[:space:]]*=[[:space:]]*pacman[[:space:]]*$/d' "$PACCONF"
   # …or drop just the `pacman` token from a shared IgnorePkg list
   run sed -i -E 's/^([[:space:]]*IgnorePkg[[:space:]]*=.*[[:space:]])pacman([[:space:],]|$)/\1\2/' "$PACCONF"
+  run sed -i -E 's/^([[:space:]]*IgnorePkg[[:space:]]*=)[[:space:]]*pacman([[:space:],])/\1/' "$PACCONF"
+}
+
+libalpm_has_installed_db() {
+  nm -D /usr/lib/libalpm.so.16 2>/dev/null | grep -q 'T alpm_pkg_get_installed_db$'
+}
+
+ensure_cachy_pacman() {
+  remove_ignore_pacman
+  if libalpm_has_installed_db; then
+    echo "CachyOS libalpm already present (alpm_pkg_get_installed_db OK)."
+    return 0
+  fi
+  if ! is_enabled; then
+    echo "Error: CachyOS repos not enabled — cannot install CachyOS pacman." >&2
+    return 1
+  fi
+  echo "Installing CachyOS pacman (needed by cachyos-kernel-manager)…"
+  run pacman -S --noconfirm pacman
+  if [[ $DRYRUN -eq 0 ]] && ! libalpm_has_installed_db; then
+    echo "Error: libalpm still missing alpm_pkg_get_installed_db after pacman install." >&2
+    return 1
+  fi
+}
+
+ensure_stock_pacman() {
+  remove_ignore_pacman
+  # After CachyOS stanzas are gone, -S pacman pulls stock from core.
+  echo "Restoring stock Arch pacman…"
+  run pacman -S --noconfirm pacman
 }
 
 # Strip the CachyOS `%INSTALLED_DB%` field from the pacman LOCAL DB (left behind
@@ -125,7 +146,7 @@ bootstrap_repos() {
   local up src awkf arch
   if is_enabled; then
     echo "CachyOS repos already present."
-    ensure_ignore_pacman
+    remove_ignore_pacman
     return 0
   fi
   echo "Detected microarchitecture tier: x86-64-$tier"
@@ -178,7 +199,7 @@ bootstrap_repos() {
     echo "Error: CachyOS repos not present in $PACCONF after setup." >&2
     exit 3
   fi
-  ensure_ignore_pacman
+  remove_ignore_pacman
   echo "CachyOS repos added (x86-64-$tier)."
 }
 
@@ -188,9 +209,10 @@ case "$CMD" in
   status) if is_enabled; then echo enabled; exit 0; else echo disabled; exit 1; fi ;;
 
   bootstrap)
-    # Offline-safe install-time path: add repos + pin stock pacman only. The
-    # linux-cachyos kernel is installed separately (pacstrap). Userspace -Suu
-    # conversion waits for `enable` once online (or the Settings toggle).
+    # Offline-safe install-time path: add repos only (stock pacman stays until
+    # first online `enable`, which installs CachyOS pacman for kernel-manager).
+    # linux-cachyos is installed separately (pacstrap). Userspace -Suu conversion
+    # waits for `enable` once online (or the Settings toggle).
     need_root
     tier="${2:-$(detect_tier)}"
     if [[ "$tier" == none ]]; then
@@ -201,6 +223,18 @@ case "$CMD" in
     echo "CachyOS repos bootstrapped (kernel already installed). Once online, run"
     echo "  hyperwebster-cachy-repo enable   (or flip the Settings toggle ON)"
     echo "to convert userspace packages to CachyOS optimized builds."
+    ;;
+
+  fix-pacman)
+    # One-shot repair for boxes that still pin stock pacman while CachyOS is on
+    # (kernel manager: undefined symbol alpm_pkg_get_installed_db).
+    need_root
+    if ! is_enabled; then
+      echo "CachyOS repos are disabled — nothing to fix (kernel manager needs them ON)."
+      exit 0
+    fi
+    ensure_cachy_pacman
+    echo "Done. Try: cachyos-kernel-manager"
     ;;
 
   enable)
@@ -215,6 +249,7 @@ case "$CMD" in
       bootstrap_repos "$tier"
     else
       echo "CachyOS repos already present — upgrading to optimized builds…"
+      remove_ignore_pacman
     fi
 
     # Pull the optimized builds, UNATTENDED (--noconfirm) so a single toggle flip
@@ -223,18 +258,10 @@ case "$CMD" in
     # auto-accepts replacements/removals pacman proposes — that's the trade-off
     # for hands-off conversion.
     #
-    # --ignore pacman: the cachyos repo ships its OWN pacman build; without this
-    # the -Suu swaps stock pacman for it, which stamps a `%INSTALLED_DB%` key into
-    # every local-DB entry that stock pacman then warns about on every op. Pin
-    # pacman to the stock build so the DB stays clean (matches the keyring/mirror-
-    # list exclusion in step 2 — stock pacman is kept throughout).
-    #
-    # Make that pin DURABLE: --ignore only covers this transaction, but the repos
-    # stay enabled afterwards, so a later routine -Syu would pull the CachyOS pacman
-    # and contaminate the local DB with %INSTALLED_DB%. Pin pacman in pacman.conf
-    # for as long as CachyOS is enabled (disable removes the pin).
-    ensure_ignore_pacman
-    run pacman -Suu --noconfirm --ignore pacman
+    # Install CachyOS pacman first so libalpm matches cachyos-kernel-manager, then
+    # -Suu without --ignore pacman (CachyOS pacman is intentional while enabled).
+    ensure_cachy_pacman
+    run pacman -Suu --noconfirm
 
     # Install the CachyOS KERNEL. The repo switch above converts USERSPACE only;
     # the kernel is a separate, explicit install. linux-cachyos is CachyOS's
@@ -262,8 +289,9 @@ case "$CMD" in
     fi
     # restore the stock Architecture (enable set it to the v3/v4 tier explicitly)
     run sed -i 's/^Architecture = .*/Architecture = auto/' "$PACCONF"
-    # drop the durable stock-pacman pin enable added (no longer needed off cachy)
-    remove_ignore_pacman
+    # drop any leftover IgnorePkg pin, then put stock Arch pacman back before
+    # the revert (CachyOS pacman is only wanted while repos are enabled).
+    ensure_stock_pacman
 
     # 2) TARGETED REVERT — put ONLY the CachyOS-built packages back on stock.
     #    -Suuy refreshes the stock DBs and downgrades/upgrades any cachy package
@@ -341,7 +369,7 @@ case "$CMD" in
     ;;
 
   *)
-    echo "Usage: $0 {detect|status|bootstrap|enable|disable} [tier] [--dry-run]" >&2
+    echo "Usage: $0 {detect|status|bootstrap|enable|disable|fix-pacman} [tier] [--dry-run]" >&2
     exit 1
     ;;
 esac
