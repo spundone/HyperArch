@@ -106,6 +106,8 @@ done
 [ -d "$SRC/zephyr-polish" ] && hw_cp "$SRC/zephyr-polish" "$DEST/"
 [ -d "$SRC/distro-tools" ] && hw_cp "$SRC/distro-tools" "$DEST/"
 [ -d "$SRC/input-remap" ] && hw_cp "$SRC/input-remap" "$DEST/"
+[ -d "$SRC/button-scroll" ] && hw_cp "$SRC/button-scroll" "$DEST/"
+[ -d "$SRC/controller-desktop" ] && hw_cp "$SRC/controller-desktop" "$DEST/"
 [ -d "$SRC/omarchy-themes" ] && hw_cp "$SRC/omarchy-themes" "$DEST/"
 [ -d "$SRC/lockscreen-polish" ] && hw_cp "$SRC/lockscreen-polish" "$DEST/"
 [ -d "$SRC/system-tools" ] && hw_cp "$SRC/system-tools" "$DEST/"

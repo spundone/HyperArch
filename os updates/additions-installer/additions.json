@@ -120,8 +120,18 @@
       "name": "Heroic (Epic / GOG / Amazon)",
       "desc": "Install games → Add to Steam → play under Non-Steam in Starman",
       "icon": "sports_esports",
-      "check": "command -v heroic >/dev/null 2>&1 || pacman -Q heroic-games-launcher-bin >/dev/null 2>&1 || pacman -Q heroic-games-launcher >/dev/null 2>&1",
+      "check": "test -x \"$HOME/.local/bin/heroic\" || { command -v heroic >/dev/null 2>&1 && pacman -Qo \"$(command -v heroic)\" >/dev/null 2>&1; }",
       "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\"; \"$HOME/.local/bin/hyperwebster-install-heroic\""
+    },
+    {
+      "id": "local-games",
+      "kind": "install",
+      "category": "gaming",
+      "name": "Local game library",
+      "desc": "Scan a folder of owned offline installs → Non-Steam shortcuts for gamescope",
+      "icon": "folder",
+      "check": "test -x \"$HOME/.local/bin/hyperwebster-local-games\"",
+      "install": "sh \"$HOME/.local/share/hyperwebster/nonsteam-gaming/install-nonsteam-gaming.sh\""
     },
     {
       "id": "steam-rom-manager",
@@ -185,6 +195,28 @@
       "install": "sh \"$HOME/.local/share/hyperwebster/input-remap/install-input-remap.sh\""
     },
     {
+      "id": "button-scroll",
+      "kind": "toggle",
+      "category": "system",
+      "name": "Middle-button scroll",
+      "desc": "Hold middle mouse button and move to scroll (broken wheel)",
+      "icon": "mouse",
+      "check": "hyperwebster-button-scroll-toggle status",
+      "enable": "hyperwebster-button-scroll-toggle enable",
+      "disable": "hyperwebster-button-scroll-toggle disable"
+    },
+    {
+      "id": "controller-desktop",
+      "kind": "toggle",
+      "category": "system",
+      "name": "Controller desktop",
+      "desc": "Gamepad maps to launcher/focus/workspaces (pauses for Steam games)",
+      "icon": "sports_esports",
+      "check": "hyperwebster-controller-desktop-toggle status",
+      "enable": "hyperwebster-controller-desktop-toggle enable",
+      "disable": "hyperwebster-controller-desktop-toggle disable"
+    },
+    {
       "id": "omarchy-themes",
       "kind": "install",
       "category": "appearance",
@@ -193,6 +225,16 @@
       "icon": "palette",
       "check": "command -v hyperwebster-theme && test -d \"$HOME/.local/share/caelestia/schemes\"",
       "install": "sh \"$HOME/.local/share/hyperwebster/omarchy-themes/install-omarchy-themes.sh\""
+    },
+    {
+      "id": "omarchy-wallpapers",
+      "kind": "install",
+      "category": "appearance",
+      "name": "Omarchy wallpapers",
+      "desc": "Stock Omarchy theme backgrounds in Wallpaper & style (~80MB)",
+      "icon": "wallpaper",
+      "check": "test -d \"$HOME/.config/omarchy/backgrounds/catppuccin\" || test -d \"$HOME/.config/omarchy/backgrounds/tokyo-night\"",
+      "install": "hyperwebster-theme sync-wallpapers || \"$HOME/.local/bin/hyperwebster-theme\" sync-wallpapers"
     },
     {
       "id": "lockscreen-polish",
