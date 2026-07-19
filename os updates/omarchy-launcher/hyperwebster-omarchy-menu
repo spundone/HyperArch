@@ -195,7 +195,7 @@ HyperWebster keymap doc
 Omarchy manual
 Hyprland wiki
 Arch wiki") in
-    "Keybindings cheatsheet") exec hyperwebster-keybinds ;;
+    "Keybindings cheatsheet") exec "${HOME}/.local/bin/hyperwebster-keybinds" ;;
     "HyperWebster keymap doc")
       terminal 'less "${HOME}/.local/share/hyperwebster/HyperWebster-keybindings.md"'
       ;;
@@ -225,7 +225,7 @@ Learn") in
       ;;
     Settings) exec hyperwebster-settings ;;
     Maintenance) exec hyperwebster-maint ;;
-    Keybindings) exec hyperwebster-keybinds ;;
+    Keybindings) exec "${HOME}/.local/bin/hyperwebster-keybinds" ;;
     Learn) show_learn_menu ;;
     *) exit 0 ;;
   esac

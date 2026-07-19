@@ -6,6 +6,9 @@ set -euo pipefail
 LAYER="${HOME}/.local/share/hyperwebster/omarchy-themes"
 USER_SCHEMES="${XDG_DATA_HOME:-$HOME/.local/share}/caelestia/schemes"
 OMARCHY_THEMES="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/themes"
+OMARCHY_BG="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/backgrounds"
+OMARCHY_SRC_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/hyperwebster/omarchy-src"
+WALLSDIR="${CAELESTIA_WALLPAPERS_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures}/Wallpapers}"
 CONV="$LAYER/lib/omarchy-to-caelestia.py"
 [ -f "$CONV" ] || CONV="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/lib/omarchy-to-caelestia.py"
 
@@ -16,6 +19,97 @@ BOLD=$'\033[1m'
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+is_image() {
+  case "${1##*.}" in
+    jpg|jpeg|png|webp|tif|tiff|JPG|JPEG|PNG|WEBP|TIF|TIFF) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+dir_has_images() {
+  local f
+  for f in "$1"/*; do
+    [ -f "$f" ] || continue
+    is_image "$f" && return 0
+  done
+  return 1
+}
+
+# Symlink Omarchy background folders into Caelestia's wallsdir so Settings →
+# Wallpaper & style lists them as categories (first path segment under wallsdir).
+link_backgrounds_into_wallsdir() {
+  mkdir -p "$WALLSDIR" "$OMARCHY_BG"
+  local src name dest
+  for src in "$OMARCHY_BG"/*; do
+    [ -d "$src" ] || continue
+    dir_has_images "$src" || continue
+    name=$(basename "$src")
+    dest="$WALLSDIR/$name"
+    if [ -L "$dest" ] || [ ! -e "$dest" ]; then
+      ln -sfn "$src" "$dest"
+    fi
+  done
+  for src in "$OMARCHY_THEMES"/*/backgrounds; do
+    [ -d "$src" ] || continue
+    dir_has_images "$src" || continue
+    name=$(basename "$(dirname "$src")")
+    dest="$WALLSDIR/$name"
+    if [ -L "$dest" ] || [ ! -e "$dest" ]; then
+      ln -sfn "$src" "$dest"
+    fi
+  done
+}
+
+# Pull stock Omarchy theme backgrounds (~80MB) into ~/.config/omarchy/backgrounds
+# (same layout as upstream), then link into ~/Pictures/Wallpapers for the picker.
+fetch_stock_backgrounds() {
+  command -v git >/dev/null 2>&1 || die "git required to sync Omarchy wallpapers"
+  mkdir -p "$OMARCHY_SRC_CACHE" "$OMARCHY_BG"
+  local repo="$OMARCHY_SRC_CACHE/omarchy"
+  if [ ! -d "$repo/.git" ]; then
+    say "Downloading Omarchy theme backgrounds (one-time, ~80MB)…"
+    git clone --filter=blob:none --sparse --depth 1 \
+      https://github.com/basecamp/omarchy.git "$repo"
+  fi
+  (
+    cd "$repo"
+    # Prefer cone-less glob so we only materialize backgrounds trees.
+    if git sparse-checkout set --no-cone 'themes/*/backgrounds' 2>/dev/null; then
+      :
+    else
+      git sparse-checkout set themes
+    fi
+    git pull --ff-only 2>/dev/null || true
+  )
+  local bgdir name dest f base
+  local n=0
+  for bgdir in "$repo/themes"/*/backgrounds; do
+    [ -d "$bgdir" ] || continue
+    name=$(basename "$(dirname "$bgdir")")
+    dest="$OMARCHY_BG/$name"
+    mkdir -p "$dest"
+    for f in "$bgdir"/*; do
+      [ -f "$f" ] || continue
+      is_image "$f" || continue
+      base=$(basename "$f")
+      if [ ! -e "$dest/$base" ]; then
+        cp -f "$f" "$dest/$base"
+        n=$((n + 1))
+      fi
+    done
+  done
+  say "Synced Omarchy backgrounds into $OMARCHY_BG ($n new file(s))."
+}
+
+cmd_sync_wallpapers() {
+  fetch_stock_backgrounds
+  link_backgrounds_into_wallsdir
+  local cats
+  cats=$(find "$WALLSDIR" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')
+  say "Linked into $WALLSDIR — open Settings → Wallpaper & style to browse ($cats categor(y/ies))."
+  notify-send "Wallpapers" "Omarchy backgrounds ready in Wallpaper & style" 2>/dev/null || true
+}
 
 slug_from_url() {
   local base name
@@ -28,7 +122,7 @@ slug_from_url() {
 }
 
 ensure_dirs() {
-  mkdir -p "$USER_SCHEMES" "$OMARCHY_THEMES"
+  mkdir -p "$USER_SCHEMES" "$OMARCHY_THEMES" "$OMARCHY_BG" "$WALLSDIR"
 }
 
 install_bundled() {
@@ -94,6 +188,7 @@ cmd_install() {
   }
   # Optional wallpaper from pack
   if compgen -G "$OMARCHY_THEMES/$name/backgrounds/*" >/dev/null; then
+    link_backgrounds_into_wallsdir
     local wall
     wall=$(find "$OMARCHY_THEMES/$name/backgrounds" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | head -1 || true)
     if [ -n "${wall:-}" ] && command -v caelestia >/dev/null 2>&1; then
@@ -212,6 +307,7 @@ cmd_update() {
       convert_pack "$d" "$(basename "$d")" >/dev/null
     fi
   done
+  link_backgrounds_into_wallsdir
   say "Done."
 }
 
@@ -302,6 +398,7 @@ PY
     say "  (then reopen Settings → Colours)"
     notify-send "Theme" "Wallpaper colours applied (saved as $name)" 2>/dev/null || true
   fi
+  link_backgrounds_into_wallsdir
 }
 
 cmd_tui() {
@@ -316,6 +413,7 @@ cmd_tui() {
     choice=$(gum choose --header "Theme actions" \
       "Pick scheme" \
       "Install from GitHub URL" \
+      "Sync Omarchy wallpapers" \
       "Generate from wallpaper" \
       "Update community themes" \
       "Remove theme" \
@@ -333,6 +431,7 @@ cmd_tui() {
         gum confirm "Continue?" >/dev/null || true
         ;;
       "Install from GitHub URL") cmd_install; gum confirm "Continue?" >/dev/null || true ;;
+      "Sync Omarchy wallpapers") cmd_sync_wallpapers; gum confirm "Continue?" >/dev/null || true ;;
       "Generate from wallpaper")
         local img
         img=$(gum input --placeholder "~/Pictures/Wallpapers/foo.jpg" --prompt "Image › ") || continue
@@ -365,12 +464,17 @@ hyperwebster-theme — Omarchy-compatible themes for HyperWebster (caelestia)
   hyperwebster-theme install <git-url|path>
   hyperwebster-theme remove [name]
   hyperwebster-theme update          git-pull community packs
+  hyperwebster-theme sync-wallpapers Fetch Omarchy backgrounds into Wallpaper & style
   hyperwebster-theme generate [image] [name]
   hyperwebster-theme install-bundled Seed Omarchy stock schemes
   hyperwebster-theme help
 
 Community themes: paste any Omarchy theme repo URL (see
 https://learn.omacom.io/2/the-omarchy-manual/90/extra-themes).
+
+Wallpaper sync: downloads basecamp/omarchy theme backgrounds into
+~/.config/omarchy/backgrounds/<theme>/ and symlinks them into
+~/Pictures/Wallpapers so Settings → Wallpaper & style can browse them.
 
 Wallpaper generator: builds a named scheme from an image (Material You /
 dynamic) and saves an Omarchy-compatible colors.toml pack.
@@ -384,6 +488,7 @@ case "${1:-}" in
   install) shift; cmd_install "$@" ;;
   remove) shift; cmd_remove "$@" ;;
   update) cmd_update ;;
+  sync-wallpapers|sync-walls|wallpapers) cmd_sync_wallpapers ;;
   generate) shift; cmd_generate "$@" ;;
   install-bundled) install_bundled ;;
   help|-h|--help) usage ;;

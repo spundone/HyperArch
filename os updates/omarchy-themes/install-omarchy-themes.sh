@@ -93,3 +93,11 @@ elif [ -x "$SRC/../colours-page/patch-colours-page.sh" ]; then
 fi
 
 echo "Done. Themes: hyperwebster-theme · Super+Ctrl+Shift+Space · Settings → Colours"
+echo "Wallpapers: hyperwebster-theme sync-wallpapers → Settings → Wallpaper & style"
+
+# Best-effort: link any pack backgrounds already present; full Omarchy pack
+# download is opt-in (network + ~80MB) via sync-wallpapers / Additions.
+if [ -x "$BIN/hyperwebster-theme" ]; then
+  "$BIN/hyperwebster-theme" sync-wallpapers 2>/dev/null \
+    || echo ":: skip wallpaper sync (offline or git missing) — run: hyperwebster-theme sync-wallpapers"
+fi
