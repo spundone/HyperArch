@@ -1,0 +1,19 @@
+# Enable gamepad / joystick wake from suspend (HyperWebster).
+#
+# Many pads (incl. GameSir Xbox-mode) lack USB remote-wakeup in their
+# descriptors, so button presses cannot wake from *deep* sleep. We still:
+#  1) enable wakeup on USB host controllers + pads that do advertise it
+#  2) keep joysticks out of USB autosuspend so *s2idle* sees button IRQs
+#
+# Matching is by joystick input capability, then common pad vendors.
+
+# USB root hubs (xhci) — allow remote-wakeup devices to resume the system
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="1d6b", ATTR{power/wakeup}=="?*", ATTR{power/wakeup}="enabled"
+
+# Common gamepad vendors (Microsoft, Sony, Nintendo, Steam, 8BitDo, GameSir, …)
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="045e|054c|057e|28de|2dc8|3537|2563|046d|0e6f|20d6|1532|0f0d|146b|0079|0810|11c0|9886|2f24|0578|1d57", ATTR{power/control}="on"
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="045e|054c|057e|28de|2dc8|3537|2563|046d|0e6f|20d6|1532|0f0d|146b|0079|0810|11c0|9886|2f24|0578|1d57", ATTR{power/wakeup}=="?*", ATTR{power/wakeup}="enabled"
+
+# Any input tagged as a joystick by udev — disable autosuspend on the USB parent
+ACTION=="add|change", SUBSYSTEM=="input", ENV{ID_INPUT_JOYSTICK}=="1", \
+  RUN+="/usr/local/bin/hyperwebster-gamepad-wakeup input %E{DEVPATH}"

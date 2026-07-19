@@ -1,0 +1,96 @@
+#!/bin/bash
+# hyperwebster-gamepad-wakeup — enable USB/host wake + keep pads out of autosuspend.
+# Runs as root (udev RUN+ or: sudo hyperwebster-gamepad-wakeup).
+set -euo pipefail
+
+log() { echo "[gamepad-wakeup] $*" >&2; }
+
+enable_file() {
+  local path=$1 val=$2
+  [ -f "$path" ] || return 0
+  # Only write when different — avoids udev loops.
+  local cur
+  cur=$(cat "$path" 2>/dev/null || true)
+  [ "$cur" = "$val" ] && return 0
+  printf '%s\n' "$val" >"$path" 2>/dev/null || true
+}
+
+enable_usb_device() {
+  local usb=$1
+  [ -d "$usb" ] || return 0
+  enable_file "$usb/power/control" "on"
+  enable_file "$usb/power/wakeup" "enabled"
+}
+
+walk_to_usb() {
+  # From an input sysfs path, walk up until a USB device (idVendor) is found.
+  local d=$1
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    if [ -f "$d/idVendor" ]; then
+      printf '%s\n' "$d"
+      return 0
+    fi
+    d=$(dirname "$d")
+  done
+  return 1
+}
+
+apply_hosts() {
+  local host
+  for host in /sys/bus/usb/devices/usb[0-9]*; do
+    [ -d "$host" ] || continue
+    enable_file "$host/power/wakeup" "enabled"
+  done
+}
+
+apply_vendor_pads() {
+  local d vend
+  for d in /sys/bus/usb/devices/[0-9]*; do
+    [ -f "$d/idVendor" ] || continue
+    vend=$(cat "$d/idVendor" 2>/dev/null || true)
+    case "$vend" in
+      045e|054c|057e|28de|2dc8|3537|2563|046d|0e6f|20d6|1532|0f0d|146b|0079|0810|11c0|9886|2f24|0578|1d57)
+        enable_usb_device "$d"
+        ;;
+    esac
+  done
+}
+
+apply_joysticks() {
+  local js real usb
+  for js in /sys/class/input/js*/device; do
+    [ -e "$js" ] || continue
+    real=$(readlink -f "$js" 2>/dev/null || true)
+    [ -n "$real" ] || continue
+    usb=$(walk_to_usb "$real" || true)
+    [ -n "${usb:-}" ] && enable_usb_device "$usb"
+  done
+}
+
+apply_one_input() {
+  # udev: hyperwebster-gamepad-wakeup input /devices/.../input/inputN
+  local devpath=${1:-}
+  [ -n "$devpath" ] || return 0
+  local sys="/sys${devpath}"
+  [ -e "$sys" ] || sys="/sys/class/input/$(basename "$devpath")"
+  local real usb
+  real=$(readlink -f "$sys" 2>/dev/null || true)
+  [ -n "$real" ] || return 0
+  usb=$(walk_to_usb "$real" || true)
+  [ -n "${usb:-}" ] && enable_usb_device "$usb"
+}
+
+if [[ ${1:-} == "input" ]]; then
+  apply_one_input "${2:-}"
+  exit 0
+fi
+
+if [[ $(id -u) -ne 0 ]]; then
+  log "must run as root (udev or: sudo $0)"
+  exit 1
+fi
+
+apply_hosts
+apply_vendor_pads
+apply_joysticks
+log "hosts + gamepads: wakeup enabled where supported; autosuspend off for pads"
