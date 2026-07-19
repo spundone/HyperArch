@@ -1,0 +1,617 @@
+#!/usr/bin/env python3
+"""hyperwebster-local-games — import a local game folder into Steam Non-Steam
+shortcuts for gamescope / Starman.
+
+Scans library roots for owned offline installs (Linux binaries or Windows
+.exe), writes launcher wrappers (Proton for .exe), and updates shortcuts.vdf.
+
+Usage:
+  hyperwebster-local-games roots add /mnt/games/MyLibrary
+  hyperwebster-local-games scan
+  hyperwebster-local-games import          # write shortcuts
+  hyperwebster-local-games import --dry-run
+  hyperwebster-local-games list
+  hyperwebster-local-games remove "Game Name"
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import stat
+import struct
+import sys
+from pathlib import Path
+
+CONF_DIR = Path.home() / ".config" / "hyperwebster"
+CONF_PATH = CONF_DIR / "local-games.json"
+STATE_DIR = Path.home() / ".local" / "share" / "hyperwebster" / "local-games"
+LAUNCHERS = STATE_DIR / "launchers"
+COMPAT = STATE_DIR / "compatdata"
+MARKER = "hyperwebster-local-games"
+
+SKIP_DIR_NAMES = {
+    "$recycle.bin",
+    "system volume information",
+    "steamlibrary",
+    "steamapps",
+    "windows",
+    "program files",
+    "program files (x86)",
+    "msocache",
+    "recovery",
+    "boot",
+    "efi",
+    ".git",
+    "node_modules",
+    "dosdevices",
+    "drive_c",
+    "pfx",
+}
+
+SKIP_EXE_SUBSTR = (
+    "uninstall",
+    "unins0",
+    "unins00",
+    "setup",
+    "redist",
+    "vcredist",
+    "directx",
+    "crashreport",
+    "crashhandler",
+    "unitycrash",
+    "easyanticheat",
+    "eac_launcher",
+    "battleye",
+    "launcher_helper",
+    "support",
+    "dotnet",
+    "oobelogger",
+    "report",
+    "updater",
+    "install",
+)
+
+LINUX_SKIP = ("uninstall", "setup", "crash", "helper", "update")
+
+
+def die(msg: str, code: int = 1) -> None:
+    print(f"hyperwebster-local-games: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_conf() -> dict:
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONF_PATH.is_file():
+        conf = {"roots": [], "proton": "auto"}
+        CONF_PATH.write_text(json.dumps(conf, indent=2) + "\n")
+        return conf
+    return json.loads(CONF_PATH.read_text())
+
+
+def save_conf(conf: dict) -> None:
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
+    CONF_PATH.write_text(json.dumps(conf, indent=2) + "\n")
+
+
+def find_steam_userdata() -> Path:
+    candidates = [
+        Path.home() / ".local/share/Steam/userdata",
+        Path.home() / ".steam/steam/userdata",
+        Path.home() / ".steam/root/userdata",
+    ]
+    for base in candidates:
+        if not base.is_dir():
+            continue
+        kids = sorted(
+            [p for p in base.iterdir() if p.is_dir() and p.name.isdigit()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for kid in kids:
+            cfg = kid / "config"
+            if cfg.is_dir():
+                return cfg
+    die("Steam userdata not found — start Steam once on the desktop first")
+
+
+def shortcuts_path() -> Path:
+    return find_steam_userdata() / "shortcuts.vdf"
+
+
+def find_proton() -> Path | None:
+    roots = [
+        Path.home() / ".local/share/Steam/steamapps/common",
+        Path.home() / ".steam/steam/steamapps/common",
+        Path.home() / ".steam/root/steamapps/common",
+    ]
+    found: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for p in root.glob("Proton*"):
+            proton = p / "proton"
+            if proton.is_file():
+                found.append(proton)
+        for p in root.glob("Proton - *"):
+            proton = p / "proton"
+            if proton.is_file():
+                found.append(proton)
+    if not found:
+        # compatibilitytools.d (GE-Proton, etc.)
+        for ctdir in (
+            Path.home() / ".local/share/Steam/compatibilitytools.d",
+            Path.home() / ".steam/root/compatibilitytools.d",
+        ):
+            if not ctdir.is_dir():
+                continue
+            for p in ctdir.iterdir():
+                proton = p / "proton"
+                if proton.is_file():
+                    found.append(proton)
+    if not found:
+        return None
+
+    def rank(p: Path) -> tuple:
+        name = p.parent.name.lower()
+        # Prefer GE / Experimental / newest-looking names.
+        ge = 0 if "ge-proton" in name or name.startswith("ge-") else 1
+        exp = 0 if "experimental" in name else 1
+        return (ge, exp, -p.stat().st_mtime)
+
+    found.sort(key=rank)
+    return found[0]
+
+
+def steam_client_root() -> Path:
+    for p in (
+        Path.home() / ".local/share/Steam",
+        Path.home() / ".steam/steam",
+        Path.home() / ".steam/root",
+    ):
+        if (p / "steam.sh").is_file() or (p / "ubuntu12_32").is_dir():
+            return p
+    return Path.home() / ".local/share/Steam"
+
+
+def sanitize_name(name: str) -> str:
+    name = re.sub(r"[\[\(].*?[\]\)]", "", name)
+    name = re.sub(r"[._]+", " ", name)
+    name = re.sub(r"\s+", " ", name).strip(" -_")
+    return name or "Game"
+
+
+def looks_like_game_dir(path: Path) -> bool:
+    low = path.name.lower()
+    if low in SKIP_DIR_NAMES:
+        return False
+    if low.startswith("."):
+        return False
+    return True
+
+
+def pick_windows_exe(game_dir: Path) -> Path | None:
+    exes = [p for p in game_dir.rglob("*.exe") if p.is_file()]
+    # Prefer shallow paths.
+    exes.sort(key=lambda p: (len(p.relative_to(game_dir).parts), -p.stat().st_size))
+    folder = re.sub(r"[^a-z0-9]", "", game_dir.name.lower())
+    scored: list[tuple[int, Path]] = []
+    for exe in exes:
+        n = exe.name.lower()
+        if n.startswith("unins") or n.startswith("setup"):
+            continue
+        if any(s in n for s in SKIP_EXE_SUBSTR):
+            continue
+        # Skip deeply nested redistrib folders.
+        parts_l = [x.lower() for x in exe.relative_to(game_dir).parts]
+        if any(x in {"redist", "_commonredist", "directx", "support"} for x in parts_l):
+            continue
+        score = 0
+        stem = re.sub(r"[^a-z0-9]", "", exe.stem.lower())
+        if stem and stem in folder:
+            score += 50
+        if folder and folder in stem:
+            score += 40
+        # Prefer top-level.
+        score += max(0, 20 - 5 * len(exe.relative_to(game_dir).parts))
+        # Prefer larger binaries (real game vs tiny helpers).
+        try:
+            size = exe.stat().st_size
+        except OSError:
+            size = 0
+        if size > 5_000_000:
+            score += 20
+        elif size > 1_000_000:
+            score += 10
+        scored.append((score, exe))
+    if not scored:
+        return None
+    scored.sort(key=lambda t: (-t[0], t[1].as_posix()))
+    return scored[0][1]
+
+
+def is_linux_executable(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    mode = path.stat().st_mode
+    if not (mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)):
+        return False
+    name = path.name.lower()
+    if name.endswith((".so", ".dll", ".dylib")):
+        return False
+    if any(s in name for s in LINUX_SKIP):
+        return False
+    # ELF magic
+    try:
+        with path.open("rb") as f:
+            return f.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
+def pick_linux_bin(game_dir: Path) -> Path | None:
+    bins = [p for p in game_dir.iterdir() if is_linux_executable(p)]
+    if not bins:
+        # one level down
+        for sub in game_dir.iterdir():
+            if sub.is_dir() and looks_like_game_dir(sub):
+                bins.extend(p for p in sub.iterdir() if is_linux_executable(p))
+    if not bins:
+        return None
+    folder = re.sub(r"[^a-z0-9]", "", game_dir.name.lower())
+    bins.sort(
+        key=lambda p: (
+            0 if re.sub(r"[^a-z0-9]", "", p.stem.lower()) in folder else 1,
+            -p.stat().st_size,
+        )
+    )
+    return bins[0]
+
+
+def discover_games(roots: list[str]) -> list[dict]:
+    games: list[dict] = []
+    seen: set[str] = set()
+    for root_s in roots:
+        root = Path(root_s).expanduser().resolve()
+        if not root.is_dir():
+            print(f"skip missing root: {root}", file=sys.stderr)
+            continue
+        # If root itself looks like a single game (has exe), treat as one.
+        candidates = []
+        if pick_windows_exe(root) or pick_linux_bin(root):
+            # Only if root is not a huge library parent with many game kids.
+            kids = [p for p in root.iterdir() if p.is_dir() and looks_like_game_dir(p)]
+            if len(kids) <= 1:
+                candidates = [root]
+            else:
+                candidates = kids
+        else:
+            candidates = [p for p in root.iterdir() if p.is_dir() and looks_like_game_dir(p)]
+
+        for gdir in candidates:
+            linux = pick_linux_bin(gdir)
+            windows = None if linux else pick_windows_exe(gdir)
+            target = linux or windows
+            if not target:
+                continue
+            name = sanitize_name(gdir.name)
+            key = str(target.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            games.append(
+                {
+                    "name": name,
+                    "dir": str(gdir),
+                    "target": str(target),
+                    "kind": "linux" if linux else "windows",
+                }
+            )
+    games.sort(key=lambda g: g["name"].lower())
+    return games
+
+
+def launcher_path_for(name: str) -> Path:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower() or "game"
+    return LAUNCHERS / f"{slug}.sh"
+
+
+def write_launcher(game: dict, proton: Path | None) -> Path:
+    LAUNCHERS.mkdir(parents=True, exist_ok=True)
+    COMPAT.mkdir(parents=True, exist_ok=True)
+    path = launcher_path_for(game["name"])
+    target = Path(game["target"])
+    workdir = Path(game["dir"])
+    slug = path.stem
+    compat = COMPAT / slug
+    steam_root = steam_client_root()
+
+    if game["kind"] == "linux":
+        body = f"""#!/bin/bash
+# {MARKER}: {game["name"]}
+set -euo pipefail
+cd {workdir.as_posix()!r}
+exec {target.as_posix()!r} "$@"
+"""
+    else:
+        if proton is None:
+            die(
+                "Windows .exe found but no Proton install under Steam — "
+                "install Steam + Proton Experimental, then re-run import"
+            )
+        compat.mkdir(parents=True, exist_ok=True)
+        body = f"""#!/bin/bash
+# {MARKER}: {game["name"]} (Proton)
+set -euo pipefail
+export STEAM_COMPAT_CLIENT_INSTALL_PATH={steam_root.as_posix()!r}
+export STEAM_COMPAT_DATA_PATH={compat.as_posix()!r}
+cd {workdir.as_posix()!r}
+exec {proton.as_posix()!r} run {target.as_posix()!r} "$@"
+"""
+    path.write_text(body)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+# --- Binary VDF (Steam shortcuts.vdf) ---
+
+def _read_cstring(data: bytes, i: int) -> tuple[str, int]:
+    j = data.index(b"\x00", i)
+    return data[i:j].decode("utf-8", errors="replace"), j + 1
+
+
+def parse_vdf_object(data: bytes, i: int = 0) -> tuple[dict, int]:
+    obj: dict = {}
+    while i < len(data):
+        typ = data[i]
+        i += 1
+        if typ == 0x08:
+            return obj, i
+        key, i = _read_cstring(data, i)
+        if typ == 0x00:
+            val, i = parse_vdf_object(data, i)
+            obj[key] = val
+        elif typ == 0x01:
+            val, i = _read_cstring(data, i)
+            obj[key] = val
+        elif typ == 0x02:
+            val = struct.unpack_from("<i", data, i)[0]
+            i += 4
+            obj[key] = val
+        else:
+            die(f"unsupported VDF type 0x{typ:02x} at {i}")
+    return obj, i
+
+
+def load_shortcuts_map(data: bytes) -> dict[str, dict]:
+    if not data:
+        return {}
+    # Root: \x00 shortcuts \x00 { entries... } \x08
+    if data[0] != 0x00:
+        die("shortcuts.vdf: missing root object marker")
+    key, i = _read_cstring(data, 1)
+    if key != "shortcuts":
+        die(f"shortcuts.vdf: expected root key 'shortcuts', got {key!r}")
+    root, _ = parse_vdf_object(data, i)
+    # root maps "0","1",... → entry dicts
+    return {k: v for k, v in root.items() if isinstance(v, dict)}
+
+
+def emit_vdf_object(obj: dict) -> bytes:
+    out = bytearray()
+    for key, val in obj.items():
+        if isinstance(val, dict):
+            out += b"\x00" + key.encode() + b"\x00" + emit_vdf_object(val) + b"\x08"
+        elif isinstance(val, str):
+            out += b"\x01" + key.encode() + b"\x00" + val.encode() + b"\x00"
+        elif isinstance(val, int):
+            out += b"\x02" + key.encode() + b"\x00" + struct.pack("<i", val)
+        else:
+            die(f"cannot encode VDF value type {type(val)}")
+    return bytes(out)
+
+
+def build_shortcuts_vdf(entries: list[dict]) -> bytes:
+    root = {str(i): e for i, e in enumerate(entries)}
+    return b"\x00shortcuts\x00" + emit_vdf_object(root) + b"\x08"
+
+
+def parse_shortcuts(data: bytes) -> list[dict]:
+    m = load_shortcuts_map(data)
+    # Preserve numeric order when present.
+    def idx(k: str) -> int:
+        return int(k) if k.isdigit() else 10**9
+
+    return [m[k] for k in sorted(m.keys(), key=idx)]
+
+
+def is_managed_entry(entry: dict) -> bool:
+    exe = str(entry.get("Exe", "")).strip().strip('"')
+    opts = str(entry.get("LaunchOptions", ""))
+    return str(LAUNCHERS) in exe or MARKER in opts
+
+
+def make_entry(game: dict, launcher: Path) -> dict:
+    return {
+        "AppName": game["name"],
+        "Exe": quote_exe(launcher),
+        "StartDir": quote_exe(Path(game["dir"])),
+        "icon": "",
+        "ShortcutPath": "",
+        "LaunchOptions": f"# {MARKER}",
+        "IsHidden": 0,
+        "AllowDesktopConfig": 1,
+        "AllowOverlay": 1,
+        "OpenVR": 0,
+        "Devkit": 0,
+        "DevkitGameID": "",
+        "DevkitOverrideAppID": 0,
+        "LastPlayTime": 0,
+        "FlatpakAppID": "",
+        "tags": {"0": "HyperWebster Local"},
+    }
+
+
+def quote_exe(path: Path) -> str:
+    # Steam stores Exe with quotes.
+    return f'"{path}"'
+
+
+def cmd_roots(args: argparse.Namespace) -> None:
+    conf = load_conf()
+    roots: list[str] = list(conf.get("roots") or [])
+    if args.roots_cmd == "list":
+        if not roots:
+            print("(no roots — add with: hyperwebster-local-games roots add /path)")
+            return
+        for r in roots:
+            print(r)
+        return
+    if args.roots_cmd == "add":
+        p = str(Path(args.path).expanduser().resolve())
+        if p not in roots:
+            roots.append(p)
+            conf["roots"] = roots
+            save_conf(conf)
+        print(f"root added: {p}")
+        return
+    if args.roots_cmd == "remove":
+        p = str(Path(args.path).expanduser().resolve())
+        roots = [r for r in roots if Path(r).resolve() != Path(p).resolve()]
+        conf["roots"] = roots
+        save_conf(conf)
+        print(f"root removed: {p}")
+        return
+    die("usage: roots [list|add|remove]")
+
+
+def cmd_scan(args: argparse.Namespace) -> None:
+    conf = load_conf()
+    roots = list(args.paths) if args.paths else list(conf.get("roots") or [])
+    if not roots:
+        die("no roots — pass paths or: hyperwebster-local-games roots add /path")
+    games = discover_games(roots)
+    if not games:
+        print("No games found.")
+        return
+    for g in games:
+        print(f"{g['kind']:7}  {g['name']}\n         {g['target']}")
+
+
+def cmd_import(args: argparse.Namespace) -> None:
+    conf = load_conf()
+    roots = list(args.paths) if args.paths else list(conf.get("roots") or [])
+    if not roots:
+        die("no roots — pass paths or: hyperwebster-local-games roots add /path")
+    games = discover_games(roots)
+    if not games:
+        die("no games found under roots")
+
+    proton = find_proton()
+    need_proton = any(g["kind"] == "windows" for g in games)
+    if need_proton and proton is None:
+        die("Proton not found under Steam — install Proton Experimental in Steam first")
+    if proton:
+        print(f"using Proton: {proton}")
+
+    sc_path = shortcuts_path()
+    existing_raw = sc_path.read_bytes() if sc_path.is_file() else b""
+    existing = parse_shortcuts(existing_raw) if existing_raw else []
+
+    # Keep non-managed shortcuts intact (Chrome, Heroic, SRM, …).
+    kept = [e for e in existing if not is_managed_entry(e)]
+    # Also drop same AppName we are about to re-add.
+    names = {g["name"] for g in games}
+    kept = [e for e in kept if e.get("AppName") not in names]
+
+    added = 0
+    for g in games:
+        launcher = write_launcher(g, proton)
+        entry = make_entry(g, launcher)
+        if args.dry_run:
+            print(f"DRY {g['kind']:7} {g['name']} -> {launcher}")
+        else:
+            kept.append(entry)
+            added += 1
+            print(f"ADD  {g['kind']:7} {g['name']}")
+
+    if args.dry_run:
+        print(f"dry-run: would add {len(games)} shortcut(s); keep {len(kept)} existing")
+        return
+
+    backup = sc_path.with_suffix(".vdf.bak-local-games")
+    if sc_path.is_file() and not backup.exists():
+        shutil.copy2(sc_path, backup)
+
+    sc_path.parent.mkdir(parents=True, exist_ok=True)
+    sc_path.write_bytes(build_shortcuts_vdf(kept))
+    print()
+    print(f"Wrote {len(kept)} shortcut(s) → {sc_path} ({added} local)")
+    print("Restart Steam (or leave Starman and Super+Shift+S back) to refresh Non-Steam.")
+
+
+def cmd_list(_args: argparse.Namespace) -> None:
+    sc_path = shortcuts_path()
+    if not sc_path.is_file():
+        print("(no shortcuts.vdf yet)")
+        return
+    for e in parse_shortcuts(sc_path.read_bytes()):
+        mark = " [local]" if is_managed_entry(e) else ""
+        print(f"{e.get('AppName', '?')}{mark}")
+        print(f"  {e.get('Exe', '')}")
+
+
+def cmd_remove(args: argparse.Namespace) -> None:
+    sc_path = shortcuts_path()
+    if not sc_path.is_file():
+        die("no shortcuts.vdf")
+    entries = parse_shortcuts(sc_path.read_bytes())
+    name = args.name
+    removed = [e for e in entries if e.get("AppName", "").lower() == name.lower()]
+    if not removed:
+        die(f"shortcut not found: {name}")
+    new = [e for e in entries if e.get("AppName", "").lower() != name.lower()]
+    for e in removed:
+        exe = str(e.get("Exe", "")).strip().strip('"')
+        p = Path(exe)
+        if p.is_file() and str(LAUNCHERS) in str(p):
+            p.unlink(missing_ok=True)
+    sc_path.write_bytes(build_shortcuts_vdf(new))
+    print(f"removed: {name}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sp = ap.add_subparsers(dest="cmd", required=True)
+
+    p_roots = sp.add_parser("roots", help="manage library roots")
+    p_roots.add_argument("roots_cmd", choices=["list", "add", "remove"])
+    p_roots.add_argument("path", nargs="?", default="")
+    p_roots.set_defaults(func=cmd_roots)
+
+    p_scan = sp.add_parser("scan", help="list discovered games")
+    p_scan.add_argument("paths", nargs="*")
+    p_scan.set_defaults(func=cmd_scan)
+
+    p_imp = sp.add_parser("import", help="write Steam Non-Steam shortcuts")
+    p_imp.add_argument("paths", nargs="*")
+    p_imp.add_argument("--dry-run", action="store_true")
+    p_imp.set_defaults(func=cmd_import)
+
+    p_list = sp.add_parser("list", help="list current Steam shortcuts")
+    p_list.set_defaults(func=cmd_list)
+
+    p_rm = sp.add_parser("remove", help="remove a shortcut by AppName")
+    p_rm.add_argument("name")
+    p_rm.set_defaults(func=cmd_remove)
+
+    args = ap.parse_args()
+    if args.cmd == "roots" and args.roots_cmd in ("add", "remove") and not args.path:
+        die("roots add|remove needs a path")
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

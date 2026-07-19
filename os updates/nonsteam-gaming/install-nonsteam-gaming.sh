@@ -28,6 +28,8 @@ for s in \
   hyperwebster-install-steam-rom-manager \
   hyperwebster-install-decky \
   hyperwebster-install-millennium \
+  hyperwebster-local-games \
+  hyperwebster-decky-cef-ensure \
   install-nonsteam-gaming.sh
 do
   [ -f "$HERE/$s" ] || continue
@@ -35,6 +37,36 @@ do
   hw_install_file "$HERE/$s" "$SHARE/$s" 0755
 done
 hw_install_file "$HERE/README.md" "$SHARE/README.md" 0644
+hw_install_file "$HERE/hyperwebster-decky-cef-ensure.service" \
+  "$SHARE/hyperwebster-decky-cef-ensure.service" 0644
+
+# User unit: recreate CEF marker before every Game Mode Steam start.
+if [ -f "$SHARE/hyperwebster-decky-cef-ensure.service" ]; then
+  mkdir -p "${HOME}/.config/systemd/user"
+  hw_install_file "$SHARE/hyperwebster-decky-cef-ensure.service" \
+    "${HOME}/.config/systemd/user/hyperwebster-decky-cef-ensure.service" 0644
+  systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user enable hyperwebster-decky-cef-ensure.service 2>/dev/null || true
+fi
+
+# Best-effort CEF + PluginLoader repair if Decky is already installed.
+if [ -x "$BIN/hyperwebster-install-decky" ] && [ -x "${HOME}/homebrew/services/PluginLoader" ]; then
+  "$BIN/hyperwebster-install-decky" >/dev/null 2>&1 || true
+fi
+
+# Desktop entry for the local library importer.
+APPDIR="${HOME}/.local/share/applications"
+mkdir -p "$APPDIR"
+cat > "$APPDIR/hyperwebster-local-games.desktop" <<EOF
+[Desktop Entry]
+Name=HyperWebster Local Games
+Comment=Import a local game folder into Steam Non-Steam (gamescope / Starman)
+Exec=kitty -e bash -lc 'hyperwebster-local-games roots list; echo; echo "Add a library: hyperwebster-local-games roots add /mnt/.../Games"; echo "Then: hyperwebster-local-games scan && hyperwebster-local-games import"; echo; bash'
+Icon=steam
+Terminal=true
+Type=Application
+Categories=Game;
+EOF
 
 # Prefer ~/.local/bin on PATH for Additions follow-up commands.
 case ":${PATH}:" in

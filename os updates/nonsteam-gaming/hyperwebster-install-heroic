@@ -1,46 +1,171 @@
 #!/bin/bash
-# hyperwebster-install-heroic — Epic / GOG / Amazon via Heroic (official .pacman).
-# Games appear in gamescope SteamUI after Heroic → Add to Steam (Non-Steam).
+# hyperwebster-install-heroic — Epic / GOG / Amazon via Heroic.
+# Prefers a user-local AppImage (no sudo). Falls back to official .pacman when
+# passwordless/root pacman is available. Repairs orphan /opt/Heroic trees that
+# left `heroic` on PATH without a pacman package (Additions then no-ops forever).
 set -euo pipefail
+
+BIN_DIR="${HOME}/.local/bin"
+APPIMAGE_TARGET="${BIN_DIR}/heroic"
+DESKTOP_DIR="${HOME}/.local/share/applications"
+API=https://api.github.com/repos/Heroic-Games-Launcher/HeroicGamesLauncher/releases/latest
 
 echo "==> HyperWebster: Heroic Games Launcher"
 
-if command -v heroic >/dev/null 2>&1 || pacman -Q heroic-games-launcher-bin >/dev/null 2>&1 \
-  || pacman -Q heroic-games-launcher >/dev/null 2>&1; then
-  echo "Heroic already installed: $(command -v heroic 2>/dev/null || echo package)"
+need_curl_jq() {
+  if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    echo "Need curl + jq to resolve the latest Heroic release." >&2
+    exit 1
+  fi
+}
+
+heroic_ok() {
+  # Real launcher on PATH (AppImage or pacman), not a dangling symlink.
+  local p
+  p=$(command -v heroic 2>/dev/null || true)
+  [ -n "$p" ] || return 1
+  [ -x "$p" ] || return 1
+  if [ -L "$p" ]; then
+    local t
+    t=$(readlink -f "$p" 2>/dev/null || true)
+    [ -n "$t" ] && [ -x "$t" ] || return 1
+  fi
+  return 0
+}
+
+pacman_owns_heroic() {
+  pacman -Q heroic-games-launcher >/dev/null 2>&1 \
+    || pacman -Q heroic-games-launcher-bin >/dev/null 2>&1 \
+    || pacman -Qo "$(command -v heroic 2>/dev/null)" >/dev/null 2>&1
+}
+
+write_desktop() {
+  local exec_line=$1
+  mkdir -p "$DESKTOP_DIR"
+  cat > "$DESKTOP_DIR/heroic.desktop" <<EOF
+[Desktop Entry]
+Name=Heroic Games Launcher
+Comment=Open Source Launcher for GOG, Epic Games and Amazon Games
+Exec=${exec_line} %U
+Terminal=false
+Type=Application
+Icon=heroic
+StartupWMClass=Heroic
+MimeType=x-scheme-handler/heroic;
+Categories=Game;
+EOF
+}
+
+install_appimage() {
+  need_curl_jq
+  local tmp url
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' RETURN
+
+  echo "==> Resolving latest Heroic AppImage…"
+  url=$(curl -fsSL "$API" | jq -r '
+    .assets[]
+    | select(.name | test("(?i)linux.*x86_64.*\\.AppImage$|linux.*amd64.*\\.AppImage$|\\.AppImage$"))
+    | select(.name | test("(?i)arm64|aarch64") | not)
+    | .browser_download_url
+  ' | head -1)
+
+  if [ -z "$url" ] || [ "$url" = "null" ]; then
+    echo "Could not find a Linux x86_64 AppImage on the latest Heroic release." >&2
+    return 1
+  fi
+
+  mkdir -p "$BIN_DIR"
+  echo "==> Downloading $url"
+  curl -fL --progress-bar -o "$APPIMAGE_TARGET" "$url"
+  chmod +x "$APPIMAGE_TARGET"
+  write_desktop "$APPIMAGE_TARGET"
+  echo "Heroic AppImage installed → $APPIMAGE_TARGET"
+  return 0
+}
+
+install_pacman_pkg() {
+  need_curl_jq
+  local tmp url pkg
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' RETURN
+
+  echo "==> Resolving latest Heroic .pacman…"
+  url=$(curl -fsSL "$API" | jq -r '
+    .assets[]
+    | select(.name | test("(?i)linux-x64\\.pacman$|linux.*\\.pacman$"))
+    | .browser_download_url
+  ' | head -1)
+
+  if [ -z "$url" ] || [ "$url" = "null" ]; then
+    echo "Could not find a .pacman asset on the latest Heroic release." >&2
+    return 1
+  fi
+
+  pkg="$tmp/heroic.pacman"
+  echo "==> Downloading $url"
+  curl -fL --progress-bar -o "$pkg" "$url"
+  echo "==> Installing with pacman -U…"
+  if [[ ${EUID:-0} -eq 0 ]]; then
+    pacman -U --needed --noconfirm "$pkg"
+  elif sudo -n true 2>/dev/null; then
+    sudo -n pacman -U --needed --noconfirm "$pkg"
+  else
+    echo "sudo required for .pacman install (no passwordless sudo)." >&2
+    return 1
+  fi
+  return 0
+}
+
+# --- already healthy? ---
+if heroic_ok && pacman_owns_heroic; then
+  echo "Heroic already installed (pacman): $(command -v heroic)"
   exit 0
 fi
 
-if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-  echo "Need curl + jq to resolve the latest Heroic release." >&2
-  exit 1
+if heroic_ok && [ -x "$APPIMAGE_TARGET" ] && [ "$(readlink -f "$(command -v heroic)")" = "$(readlink -f "$APPIMAGE_TARGET")" ]; then
+  echo "Heroic already installed (AppImage): $APPIMAGE_TARGET"
+  exit 0
 fi
 
-API=https://api.github.com/repos/Heroic-Games-Launcher/HeroicGamesLauncher/releases/latest
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# Orphan /opt/Heroic (files present, not in pacman db) — Additions used to
+# treat this as success and never repair.
+if heroic_ok && ! pacman_owns_heroic; then
+  echo "Found orphan Heroic on PATH ($(command -v heroic)) without a pacman package."
+  echo "Repairing with a user-local AppImage (no sudo)…"
+  # Prefer AppImage so PATH resolves to a owned, updatable binary.
+  if install_appimage; then
+    # Put AppImage ahead of /usr/bin in the desktop entry; leave /opt alone
+    # (removing it needs root). Ensure ~/.local/bin is first on PATH for shells.
+    if [ -x "$APPIMAGE_TARGET" ]; then
+      hash -r 2>/dev/null || true
+    fi
+    echo
+    echo "Heroic repaired via AppImage."
+    echo "Next: open Heroic → log into Epic/GOG/Amazon → enable Add to Steam."
+    exit 0
+  fi
+  echo "AppImage repair failed; trying .pacman…" >&2
+  install_pacman_pkg || {
+    echo "Could not repair Heroic. Install manually from https://heroicgameslauncher.com/downloads" >&2
+    exit 1
+  }
+  exit 0
+fi
 
-echo "==> Resolving latest Heroic .pacman from GitHub releases…"
-URL=$(curl -fsSL "$API" | jq -r '
-  .assets[]
-  | select(.name | test("(?i)linux.*\\.pacman$|\\.pacman$"))
-  | .browser_download_url
-' | head -1)
+# Fresh install: AppImage first (Additions has no sudo password).
+if install_appimage; then
+  echo
+  echo "Heroic installed."
+  echo "Next: open Heroic on the desktop → log into Epic/GOG/Amazon →"
+  echo "  Settings → Add games to Steam automatically  (or per-game Add to Steam)."
+  echo "Those titles show under Non-Steam in Starman / gamescope SteamUI."
+  exit 0
+fi
 
-if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-  echo "Could not find a .pacman asset on the latest Heroic release." >&2
+echo "AppImage install failed; trying official .pacman (needs sudo)…" >&2
+install_pacman_pkg || {
   echo "Install manually from https://heroicgameslauncher.com/downloads" >&2
   exit 1
-fi
-
-PKG="$TMP/heroic.pacman"
-echo "==> Downloading $URL"
-curl -fL --progress-bar -o "$PKG" "$URL"
-echo "==> Installing with pacman -U…"
-sudo pacman -U --needed --noconfirm "$PKG"
-
-echo
-echo "Heroic installed."
-echo "Next: open Heroic on the desktop → log into Epic/GOG/Amazon →"
-echo "  Settings → Add games to Steam automatically  (or per-game Add to Steam)."
-echo "Those titles show under Non-Steam in Starman / gamescope SteamUI."
+}
+echo "Heroic installed via pacman."

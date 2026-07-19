@@ -1,0 +1,11 @@
+#!/bin/bash
+# Ensure Steam CEF remote-debugging marker exists before Game Mode Steam starts.
+# Without this empty file, Decky PluginLoader never gets a CEF socket and the
+# Quick Access Decky tab stays missing.
+set -euo pipefail
+STEAM_ROOT="${HOME}/.local/share/Steam"
+[ -d "$STEAM_ROOT" ] || STEAM_ROOT="${HOME}/.steam/steam"
+[ -d "$STEAM_ROOT" ] || exit 0
+touch "${STEAM_ROOT}/.cef-enable-remote-debugging"
+chmod 644 "${STEAM_ROOT}/.cef-enable-remote-debugging" || true
+exit 0

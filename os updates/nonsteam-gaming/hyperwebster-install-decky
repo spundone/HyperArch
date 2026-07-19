@@ -1,24 +1,171 @@
 #!/bin/bash
 # hyperwebster-install-decky — Decky Loader (Game Mode Quick Access plugins).
-# Official upstream installer. Experimental on non-SteamOS / CachyOS sessions.
+# Official upstream installer + HyperWebster repair (CEF marker, service, perms).
+# Experimental on non-SteamOS / CachyOS sessions.
 set -euo pipefail
 
 echo "==> HyperWebster: Decky Loader (experimental)"
 echo "    Injects into Steam Game Mode (gamescope). Do not stack casually with Millennium."
 
-if [ -x "${HOME}/homebrew/services/PluginLoader" ]; then
-  echo "Decky PluginLoader already present at ~/homebrew/services/PluginLoader"
-  exit 0
+STEAM_ROOT="${STEAM_ROOT:-$HOME/.local/share/Steam}"
+[ -d "$STEAM_ROOT" ] || STEAM_ROOT="$HOME/.steam/steam"
+HOMEBREW="${HOME}/homebrew"
+
+ensure_cef_marker() {
+  local root=$1
+  [ -d "$root" ] || return 0
+  # Empty file — Steam opens Chrome DevTools on :8080 so Decky can inject.
+  touch "$root/.cef-enable-remote-debugging"
+  chmod 644 "$root/.cef-enable-remote-debugging"
+  echo "    CEF marker: $root/.cef-enable-remote-debugging"
+}
+
+ensure_plugin_loader() {
+  if [ ! -x "$HOMEBREW/services/PluginLoader" ]; then
+    return 1
+  fi
+  # plugins/ is often root-owned after the official installer — store installs fail.
+  if [ -d "$HOMEBREW/plugins" ] && [ ! -w "$HOMEBREW/plugins" ]; then
+    if sudo -n chown -R "$USER:$USER" "$HOMEBREW/plugins" 2>/dev/null; then
+      echo "    fixed plugins/ ownership"
+    else
+      echo "    NOTE: $HOMEBREW/plugins is not writable — run:"
+      echo "      sudo chown -R $USER:$USER $HOMEBREW/plugins"
+    fi
+  fi
+  if [ -f /etc/systemd/system/plugin_loader.service ]; then
+    sudo -n systemctl enable --now plugin_loader.service 2>/dev/null \
+      || systemctl --user enable --now plugin_loader.service 2>/dev/null \
+      || true
+    sudo -n systemctl restart plugin_loader.service 2>/dev/null || true
+  fi
+  return 0
+}
+
+millennium_still_present() {
+  [ -d /usr/lib/millennium ] && return 0
+  [ -e "$STEAM_ROOT/millennium" ] && return 0
+  local libdir f
+  for libdir in ubuntu12_64 ubuntu12_32; do
+    for f in libXtst.so.6 libmillennium_hhx64.so libmillennium_bootstrap_hhx64.so libmillennium_bootstrap_x86.so; do
+      if [ -L "$STEAM_ROOT/$libdir/$f" ] && readlink "$STEAM_ROOT/$libdir/$f" 2>/dev/null | grep -q millennium; then
+        return 0
+      fi
+      if [ -e "$STEAM_ROOT/$libdir/libmillennium_hhx64.so" ]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+warn_millennium() {
+  if millennium_still_present; then
+    echo
+    echo "WARNING: Millennium is still installed/hooked. Stacking it with Decky"
+    echo "         breaks the QAM plug tab (SP_JSX / React errors)."
+    echo "         Prefer one or the other. Hard-disable with:"
+    echo "           sudo sh /tmp/fix-decky-qam.sh"
+    echo "         (or: sudo mv /usr/lib/millennium /usr/lib/millennium.disabled-for-decky)"
+  fi
+}
+
+# Millennium replaces ubuntu12_*/libXtst.so.6 with its bootstrap — that fights
+# Decky's CEF inject. Park the hooks so Decky can own Game Mode QAM.
+disable_millennium_hooks() {
+  local libdir d f backup
+  backup="${HOME}/.local/share/hyperwebster/millennium-disabled-$(date +%Y%m%d%H%M%S)"
+  local moved=0
+  for libdir in ubuntu12_64 ubuntu12_32; do
+    d="$STEAM_ROOT/$libdir"
+    [ -d "$d" ] || continue
+    for f in libXtst.so.6 libmillennium_hhx64.so libmillennium_bootstrap_hhx64.so libmillennium_bootstrap_x86.so; do
+      if [ -e "$d/$f" ] || [ -L "$d/$f" ]; then
+        # Only move Millennium's hijack (symlink into /usr/lib/millennium)
+        if [ -L "$d/$f" ] && readlink "$d/$f" | grep -q millennium; then
+          mkdir -p "$backup"
+          mv "$d/$f" "$backup/"
+          moved=1
+          echo "    disabled Millennium hook: $d/$f"
+        elif [[ "$f" == libmillennium* ]]; then
+          mkdir -p "$backup"
+          mv "$d/$f" "$backup/"
+          moved=1
+          echo "    disabled Millennium lib: $d/$f"
+        fi
+      fi
+    done
+  done
+  if [ "$moved" = 1 ]; then
+    echo "    Millennium hooks parked at $backup (restore those symlinks to re-enable)"
+  fi
+  # Soft-disable inject flags if config exists (does not need root).
+  if [ -f "$HOME/.config/millennium/config.json" ]; then
+    python3 - <<'PY' 2>/dev/null || true
+import json
+from pathlib import Path
+p = Path.home() / ".config/millennium/config.json"
+data = json.loads(p.read_text())
+g = data.setdefault("general", {})
+g["injectCSS"] = False
+g["injectJavascript"] = False
+g["checkForMillenniumUpdates"] = False
+p.write_text(json.dumps(data, indent=2) + "\n")
+print("    millennium config: injectCSS/JS off")
+PY
+  fi
+}
+
+# Always ensure inject prerequisites (even if PluginLoader already exists).
+ensure_cef_marker "$STEAM_ROOT"
+[ -d "$HOME/.steam/steam" ] && ensure_cef_marker "$(readlink -f "$HOME/.steam/steam")"
+disable_millennium_hooks
+warn_millennium
+
+if ensure_plugin_loader; then
+  echo "Decky PluginLoader present at $HOMEBREW/services/PluginLoader"
+else
+  INSTALLER_URL=https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh
+  echo "==> Running official Decky installer…"
+  echo "    Source: $INSTALLER_URL"
+  curl -fsSL "$INSTALLER_URL" | sh
+  ensure_cef_marker "$STEAM_ROOT"
+  disable_millennium_hooks
+  ensure_plugin_loader || true
 fi
 
-INSTALLER_URL=https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh
-echo "==> Running official Decky installer…"
-echo "    Source: $INSTALLER_URL"
-curl -fsSL "$INSTALLER_URL" | sh
-
-if [ -x "${HOME}/homebrew/services/PluginLoader" ]; then
-  echo "Decky installed. Enter Starman / gamescope and open the Quick Access menu (⋯)."
-else
-  echo "Installer finished — if PluginLoader is missing, re-run after fixing sudo/network." >&2
+if [ ! -x "$HOMEBREW/services/PluginLoader" ]; then
+  echo "Installer finished — PluginLoader still missing; check sudo/network." >&2
   exit 1
 fi
+
+# Portal-aware QAM tab fix (Steam createPortal breaks stock Decky TabsHook walk).
+SRC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+install -d -m 0755 "$HOME/.local/bin" "$HOME/.config/systemd/user"
+install -m 0755 "$SRC_DIR/hyperwebster-decky-qam-fix" "$HOME/.local/bin/hyperwebster-decky-qam-fix"
+install -m 0644 "$SRC_DIR/hyperwebster-decky-qam-fix.service" \
+  "$HOME/.config/systemd/user/hyperwebster-decky-qam-fix.service"
+# CEF marker helper (if present in the same layer).
+if [ -f "$SRC_DIR/hyperwebster-decky-cef-ensure" ]; then
+  install -m 0755 "$SRC_DIR/hyperwebster-decky-cef-ensure" "$HOME/.local/bin/hyperwebster-decky-cef-ensure"
+fi
+if [ -f "$SRC_DIR/hyperwebster-decky-cef-ensure.service" ]; then
+  install -m 0644 "$SRC_DIR/hyperwebster-decky-cef-ensure.service" \
+    "$HOME/.config/systemd/user/hyperwebster-decky-cef-ensure.service"
+fi
+systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user enable --now hyperwebster-decky-qam-fix.service 2>/dev/null \
+  || systemctl --user restart hyperwebster-decky-qam-fix.service 2>/dev/null \
+  || true
+echo "    Decky QAM portal fix enabled (user service)"
+
+echo
+echo "Decky is ready only after Steam restarts with the CEF marker in place."
+echo "  1. Fully exit Steam / Starman (not just sleep)"
+echo "  2. Re-enter Starman / Gamescope"
+echo "  3. Wait ~10s, then open Quick Access (Guide+X / ⋯) — pink plug is the LAST tab"
+echo
+echo "If the tab is still missing:"
+echo "  sudo sh /tmp/fix-decky-qam.sh   # parks Millennium system libs + upgrades Decky"
+echo "  systemctl --user restart hyperwebster-decky-qam-fix"
+echo "  then fully restart Steam again. Do not run Millennium while using Decky."

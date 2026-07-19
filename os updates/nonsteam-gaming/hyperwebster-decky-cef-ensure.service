@@ -1,0 +1,12 @@
+[Unit]
+Description=Ensure Decky CEF remote-debugging marker before Steam Game Mode
+Before=steam-launcher.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/hyperwebster-decky-cef-ensure
+RemainAfterExit=yes
+
+[Install]
+WantedBy=gamescope-session.target
+WantedBy=steam-launcher.service

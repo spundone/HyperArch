@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""hyperwebster-decky-qam-fix — keep Decky's Quick Access tab visible in Game Mode.
+
+Steam Game Mode renders QAM via createPortal into a QuickAccess BrowserView.
+Decky's stock TabsHook sometimes fails to walk that portal tree, so the pink
+plug tab never appears even though Decky is loaded. This helper waits for CEF
+(:8080), then injects a portal-aware afterPatch into SharedJSContext.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import struct
+import sys
+import time
+import urllib.error
+import urllib.request
+
+CEF = "http://127.0.0.1:8080"
+INJECT_JS = r"""
+(() => {
+  if (window.__hyperwebsterDeckyQamFix) return "already";
+  const DFL = window.DFL;
+  const loader = window.DeckyPluginLoader;
+  if (!DFL || !loader || !loader.tabsHook) return "waiting-decky";
+  if (typeof DFL.afterPatch !== "function") return "no-afterPatch";
+
+  window.__hyperwebsterDeckyQamFix = true;
+  const th = loader.tabsHook;
+
+  function deepFind(node, pred, seen) {
+    if (node == null || typeof node !== "object") return null;
+    seen = seen || new Set();
+    if (seen.has(node)) return null;
+    seen.add(node);
+    try {
+      if (pred(node)) return node;
+    } catch (e) {}
+    if (Array.isArray(node)) {
+      for (const c of node) {
+        const r = deepFind(c, pred, seen);
+        if (r) return r;
+      }
+      return null;
+    }
+    for (const k of ["children", "props", "child", "sibling"]) {
+      if (k in node) {
+        const r = deepFind(node[k], pred, seen);
+        if (r) return r;
+      }
+    }
+    if (node.props && typeof node.props === "object") {
+      for (const v of Object.values(node.props)) {
+        const r = deepFind(v, pred, seen);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+
+  let patchedInnerType = null;
+
+  function ensureInnerPatched(tree) {
+    const itEl = deepFind(
+      tree,
+      (n) =>
+        n &&
+        n.props &&
+        typeof n.props.onFocusNavDeactivated !== "undefined" &&
+        (typeof n.props.visible !== "undefined" || typeof n.props.active !== "undefined")
+    );
+    if (!itEl) return "no-inner";
+    if (patchedInnerType) {
+      itEl.type = patchedInnerType;
+      return "reuse";
+    }
+    const handler = (args, ret) => {
+      try {
+        const tabsNode = deepFind(
+          ret,
+          (x) => Array.isArray(x?.props?.tabs) && x.props.tabs.length >= 2
+        );
+        if (tabsNode && tabsNode.props && tabsNode.props.tabs) {
+          const visible = !!(args && args[0] && (args[0].visible || args[0].active));
+          th.render(tabsNode.props.tabs, visible);
+        } else {
+          console.warn("[HyperWebster] Decky QAM: no tabs array in QuickAccess tree");
+        }
+      } catch (e) {
+        console.error("[HyperWebster] Decky QAM patch error", e);
+      }
+      return ret;
+    };
+    DFL.afterPatch(itEl, "type", handler);
+    patchedInnerType = itEl.type;
+    try {
+      patchedInnerType.__hwDeckyPatched = true;
+    } catch (e) {}
+    console.log("[HyperWebster] Decky QAM: portal-aware inner patch installed");
+    return "patched";
+  }
+
+  const qamModule = DFL.findModuleByExport(
+    (e) => e?.type?.toString?.()?.includes("QuickAccessMenuBrowserView")
+  );
+  if (!qamModule) return "no-qam-module";
+
+  const renderers = Object.values(qamModule).filter(
+    (e) =>
+      e?.type?.toString?.()?.includes("QuickAccessMenuBrowserView") ||
+      e?.type?.toString?.()?.includes("QuickAccessMenuEmbedded")
+  );
+  if (!renderers.length) return "no-renderers";
+
+  for (const renderer of renderers) {
+    DFL.afterPatch(renderer, "type", (_args, ret) => {
+      ensureInnerPatched(ret);
+      return ret;
+    });
+  }
+
+  // Nudge already-mounted QAM fibers onto the patched outer type (stock Decky does this too).
+  try {
+    const rootEl = document.getElementById("root");
+    let fiber = null;
+    if (rootEl) {
+      for (const k of Object.keys(rootEl)) {
+        if (k.startsWith("__reactFiber") || k.startsWith("__reactContainer")) {
+          fiber = rootEl[k];
+          break;
+        }
+      }
+    }
+    const walk = (n, d) => {
+      if (!n || d > 60) return;
+      try {
+        for (const rend of renderers) {
+          if (n.elementType === rend) {
+            n.type = n.elementType.type;
+            if (n.alternate) n.alternate.type = n.type;
+          }
+        }
+      } catch (e) {}
+      walk(n.child, d + 1);
+      walk(n.sibling, d);
+    };
+    if (fiber) walk(fiber.current || fiber, 0);
+  } catch (e) {}
+
+  try {
+    if (loader.toaster) {
+      loader.toaster.toast({
+        title: "Decky QAM fix",
+        body: "Open Quick Access (Guide+X). Pink plug tab should be last.",
+        duration: 6000,
+        critical: false,
+      });
+    }
+  } catch (e) {}
+
+  return "ok:" + renderers.length;
+})()
+"""
+
+
+def ws_connect(url: str):
+    rest = url[5:]
+    hostport, path = rest.split("/", 1)
+    path = "/" + path
+    host, port = hostport.split(":")
+    port = int(port)
+    key = base64.b64encode(os.urandom(16)).decode()
+    req = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {hostport}\r\n"
+        f"Upgrade: websocket\r\n"
+        f"Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        f"Sec-WebSocket-Version: 13\r\n\r\n"
+    )
+    import socket
+
+    s = socket.create_connection((host, port), timeout=5)
+    s.sendall(req.encode())
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    header, rest = data.split(b"\r\n\r\n", 1)
+    if b"101" not in header.split(b"\r\n", 1)[0]:
+        raise RuntimeError(header.decode("replace")[:300])
+    return s, rest
+
+
+def ws_send(s, text: str):
+    payload = text.encode()
+    mask = os.urandom(4)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    header = bytearray([0x81])
+    n = len(payload)
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.append(0x80 | 126)
+        header.extend(struct.pack("!H", n))
+    else:
+        header.append(0x80 | 127)
+        header.extend(struct.pack("!Q", n))
+    header.extend(mask)
+    s.sendall(bytes(header) + masked)
+
+
+def ws_recv(s, leftover=b"", timeout=5):
+    s.settimeout(timeout)
+    buf = leftover
+
+    def read_exact(n):
+        nonlocal buf
+        while len(buf) < n:
+            chunk = s.recv(max(4096, n - len(buf)))
+            if not chunk:
+                raise ConnectionError("closed")
+            buf += chunk
+        out, buf = buf[:n], buf[n:]
+        return out
+
+    while True:
+        b0 = read_exact(1)[0]
+        b1 = read_exact(1)[0]
+        opcode = b0 & 0x0F
+        masked = (b1 & 0x80) != 0
+        n = b1 & 0x7F
+        if n == 126:
+            n = struct.unpack("!H", read_exact(2))[0]
+        elif n == 127:
+            n = struct.unpack("!Q", read_exact(8))[0]
+        mask = read_exact(4) if masked else b""
+        payload = read_exact(n)
+        if masked:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        if opcode == 0x1:
+            return payload.decode(), buf
+        if opcode == 0x8:
+            raise ConnectionError("close")
+
+
+def cdp_eval(ws_url: str, expression: str):
+    s, leftover = ws_connect(ws_url)
+    msg_id = 1
+
+    def call(method, params=None):
+        nonlocal msg_id, leftover
+        mid = msg_id
+        msg_id += 1
+        obj = {"id": mid, "method": method}
+        if params is not None:
+            obj["params"] = params
+        ws_send(s, json.dumps(obj))
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            raw, leftover = ws_recv(s, leftover, timeout=max(0.5, deadline - time.time()))
+            data = json.loads(raw)
+            if data.get("id") == mid:
+                return data
+        raise TimeoutError(method)
+
+    try:
+        call("Runtime.enable")
+        return call(
+            "Runtime.evaluate",
+            {"expression": expression, "returnByValue": True, "awaitPromise": True},
+        )
+    finally:
+        s.close()
+
+
+def cef_pages():
+    with urllib.request.urlopen(CEF + "/json/list", timeout=2) as r:
+        return json.load(r)
+
+
+def once() -> str:
+    pages = {p.get("title"): p for p in cef_pages()}
+    shared = pages.get("SharedJSContext")
+    if not shared:
+        return "no-shared"
+    result = cdp_eval(shared["webSocketDebuggerUrl"], INJECT_JS)
+    val = result.get("result", {}).get("result", {})
+    return str(val.get("value", val))
+
+
+def main() -> int:
+    watch = "--watch" in sys.argv or os.environ.get("HYPERWEBSTER_DECKY_QAM_WATCH") == "1"
+    if not watch:
+        try:
+            print(once())
+            return 0
+        except Exception as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+
+    last = ""
+    while True:
+        try:
+            status = once()
+            if status != last:
+                print(time.strftime("%H:%M:%S"), status, flush=True)
+                last = status
+            # Re-inject after Steam webhelper restarts (flag lives in page JS heap).
+            if status.startswith("ok") or status == "already":
+                time.sleep(15)
+            else:
+                time.sleep(3)
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+            if last != "cef-down":
+                print(time.strftime("%H:%M:%S"), "cef-down", e.__class__.__name__, flush=True)
+                last = "cef-down"
+            time.sleep(3)
+        except Exception as e:
+            print(time.strftime("%H:%M:%S"), "error", e, flush=True)
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

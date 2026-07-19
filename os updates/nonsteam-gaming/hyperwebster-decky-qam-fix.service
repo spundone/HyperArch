@@ -1,0 +1,14 @@
+[Unit]
+Description=HyperWebster Decky QAM portal fix (Game Mode plug tab)
+After=hyperwebster-decky-cef-ensure.service
+PartOf=gamescope-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hyperwebster-decky-qam-fix --watch
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=gamescope-session.target
+WantedBy=default.target
