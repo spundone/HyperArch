@@ -36,6 +36,18 @@ fi
 # process check, but keeps Super+Shift+R paths consistent).
 touch /tmp/.gaming-session-active 2>/dev/null || true
 
-# Detached: this session dies when SDDM restarts.
-nohup sudo -n /usr/local/bin/hyperwebster-restart-sddm >/dev/null 2>&1 &
-disown 2>/dev/null || true
+notify "Switching to Starman…"
+
+# Escape the controller-desktop cgroup. Guide+Start used to run this script as a
+# child of that service, then `systemctl --user stop` killed the script before
+# SDDM restarted — pad frozen, still on Hyprland. Queue stop+restart outside.
+ENTER_CMD='systemctl --user stop hyperwebster-controller-desktop.service 2>/dev/null || true; exec sudo -n /usr/local/bin/hyperwebster-restart-sddm'
+
+if command -v systemd-run >/dev/null 2>&1; then
+  systemctl --user reset-failed hyperwebster-enter-gaming.service 2>/dev/null || true
+  systemd-run --user --collect --unit=hyperwebster-enter-gaming \
+    --description="Enter Starman / gamescope via SDDM" \
+    /bin/bash -c "$ENTER_CMD"
+else
+  setsid -f /bin/bash -c "$ENTER_CMD" >/dev/null 2>&1 || true
+fi

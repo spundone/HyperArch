@@ -48,5 +48,7 @@ rm -f /tmp/.gaming-session-active
 log "steam -shutdown + stop gamescope-session.target"
 timeout 5 steam -shutdown >>"$LOG" 2>&1 || true
 systemctl --user stop gamescope-session.target >>"$LOG" 2>&1 || true
+# Bring desktop gamepad mapper back (stopped on switch-to-gaming).
+systemctl --user start hyperwebster-controller-desktop.service >>"$LOG" 2>&1 || true
 log "done"
 exit 0
