@@ -100,6 +100,7 @@ done
 [ -d "$SRC/gamemode-toggle-deckshift" ] && hw_cp "$SRC/gamemode-toggle-deckshift" "$DEST/"
 [ -d "$SRC/iphone-tether" ] && hw_cp "$SRC/iphone-tether" "$DEST/"
 [ -d "$SRC/notif-clear-fix" ] && hw_cp "$SRC/notif-clear-fix" "$DEST/"
+[ -d "$SRC/notif-blur-fix" ] && hw_cp "$SRC/notif-blur-fix" "$DEST/"
 [ -d "$SRC/btrfs-snapshot-manager" ] && hw_cp "$SRC/btrfs-snapshot-manager" "$DEST/"
 [ -d "$SRC/hypersmooth-display" ] && hw_cp "$SRC/hypersmooth-display" "$DEST/"
 [ -d "$SRC/zephyr-polish" ] && hw_cp "$SRC/zephyr-polish" "$DEST/"
