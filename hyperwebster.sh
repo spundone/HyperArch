@@ -1750,9 +1750,10 @@ HYPERWEBSTER_TOKENS
 # Outlined icons, drop the Performance/Weather dashboard tabs, visualiser off.
 # F9: HyperWebster launches Hyprland via uwsm, but caelestia's built-in default
 # session.commands.logout targets a plain (non-uwsm) session, so the session
-# menu's Logout button was a no-op. `uwsm stop` is the documented way to end a
-# uwsm session (drops back to SDDM); shutdown/reboot/hibernate use systemctl and
-# are left at caelestia's defaults.
+# menu's Logout button was a no-op. `uwsm stop` ends a uwsm session (back to
+# SDDM). Shutdown/reboot must NOT use bare "poweroff"/"systemctl poweroff" —
+# SessionManager claims those, returns success, then the async logind call can
+# fail silently (polkit / inhibitors). Route through hyperwebster-session-power.
 cat > "$M_HOME/.config/caelestia/shell.json" <<'HYPERWEBSTER_SHELL'
 {
   "appearance": {
@@ -1775,7 +1776,10 @@ cat > "$M_HOME/.config/caelestia/shell.json" <<'HYPERWEBSTER_SHELL'
   },
   "session": {
     "commands": {
-      "logout": ["uwsm", "stop"]
+      "logout": ["hyperwebster-session-power", "logout"],
+      "shutdown": ["hyperwebster-session-power", "shutdown"],
+      "reboot": ["hyperwebster-session-power", "reboot"],
+      "hibernate": ["hyperwebster-session-power", "hibernate"]
     }
   },
   "dashboard": { "showPerformance": false, "showWeather": true },
@@ -2025,6 +2029,7 @@ install -m 755 "$LAYER/hyperwebster-keybinds" "$LAYER/hyperwebster-keybinds-gen"
   "$LAYER/system-polish/hyperwebster-webapp-install" \
   "$LAYER/system-polish/hyperwebster-webapp-remove" \
   "$LAYER/system-polish/hyperwebster-welcome" \
+  "$LAYER/session-power/hyperwebster-session-power" \
   "$LAYER/updates-panel/hyperwebster-update-check" \
   "$LAYER/super-clipboard/super-copy" \
   "$LAYER/super-clipboard/super-paste" \

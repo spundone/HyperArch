@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Reliable power actions for the Caelestia session menu (Super+Escape).
+#
+# Caelestia SessionManager maps ["poweroff"] / ["systemctl","poweroff"] to a
+# logind PowerOff D-Bus call and returns success immediately. When that call
+# fails asynchronously (polkit prompt missing, inhibitors, etc.) the menu
+# click appears to do nothing and never falls back to execDetached.
+#
+# This helper is intentionally NOT a bare "poweroff"/"reboot" name so
+# SessionManager leaves it alone and Quickshell runs it via execDetached.
+set -euo pipefail
+
+action="${1:-}"
+log() { printf '[hyperwebster-session-power] %s\n' "$*" >&2; }
+
+power() {
+  local verb=$1
+  # Plain systemctl first (active seat usually allowed). Then ignore inhibitors
+  # if something is soft-blocking; finally loginctl.
+  if systemctl "$verb"; then
+    return 0
+  fi
+  if systemctl "$verb" --ignore-inhibitors 2>/dev/null || systemctl "$verb" -i; then
+    return 0
+  fi
+  loginctl "$verb"
+}
+
+case "$action" in
+  shutdown|poweroff)
+    log "shutdown"
+    power poweroff
+    ;;
+  reboot)
+    log "reboot"
+    power reboot
+    ;;
+  hibernate)
+    log "hibernate"
+    systemctl hibernate || loginctl hibernate
+    ;;
+  logout)
+    log "logout"
+    if command -v uwsm >/dev/null 2>&1; then
+      uwsm stop
+    elif command -v hyprctl >/dev/null 2>&1; then
+      hyprctl dispatch exit
+    else
+      loginctl terminate-session "${XDG_SESSION_ID:-self}"
+    fi
+    ;;
+  *)
+    echo "usage: $0 shutdown|reboot|hibernate|logout" >&2
+    exit 2
+    ;;
+esac
